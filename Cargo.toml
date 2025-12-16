@@ -1,0 +1,22 @@
+[package]
+name = "rosetta"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+anyhow = "1.0.100"
+dotenvy = "0.15.7"
+env_logger = "0.11"
+log = "0.4"
+matrix-sdk = "0.16.0"
+tokio = { version = "1.48.0", features = ["full"] }
+whatsapp-rust = { git = "https://github.com/jlucaso1/whatsapp-rust", branch = "main" }
+wacore = { git = "https://github.com/jlucaso1/whatsapp-rust", branch = "main" }
+waproto = { git = "https://github.com/jlucaso1/whatsapp-rust", branch = "main" }
+whatsapp-rust-tokio-transport = { git = "https://github.com/jlucaso1/whatsapp-rust", branch = "main" }
+whatsapp-rust-ureq-http-client = { git = "https://github.com/jlucaso1/whatsapp-rust", branch = "main" }
+wacore-binary = { git = "https://github.com/jlucaso1/whatsapp-rust", branch = "main" }
+qr2term = "0.3.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"

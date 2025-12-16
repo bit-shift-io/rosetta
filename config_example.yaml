@@ -1,0 +1,16 @@
+matrix:
+  homeserver_url: "https://matrix.org"
+  username: "your_user"
+  password: "your_password"
+  room_id: "!your_room_id:matrix.org"
+  debug: true
+  aliases:
+    "@bronson:matrix.org": "Bronson"
+
+whatsapp:
+  target_id: "1234567890@s.whatsapp.net"
+  debug: true
+  bridge_own_messages: true
+  aliases:
+    "1234567890@s.whatsapp.net": "Alice"
+    "97809944584205@lid": "MySelf"

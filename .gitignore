@@ -1,0 +1,17 @@
+# Rust
+/target/
+
+# Configuration / Secrets
+.env
+config.yaml
+
+# WhatsApp Database (Local SQLite)
+*.db
+*.db-shm
+*.db-wal
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
