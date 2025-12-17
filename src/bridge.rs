@@ -53,21 +53,45 @@ impl BridgeCoordinator {
         services: &HashMap<String, Arc<tokio::sync::Mutex<Box<dyn Service>>>>,
         config: &Config,
     ) {
+        info!(
+            "Processing message from {}:{} (sender: {})",
+            msg.source_service, msg.source_channel, msg.sender
+        );
+
+        let mut matched_any_bridge = false;
+
         // Find which bridge(s) this message belongs to
         for (bridge_name, channels) in &config.bridges {
             // Find the source channel config
             let source_channel = channels.iter().find(|ch| {
+                // Debug log matching attempts (info level for now to debug)
+                // info!("Checking bridge '{}': {}/{} vs msg {}/{}", 
+                //    bridge_name, ch.service, ch.channel, msg.source_service, msg.source_channel);
                 ch.service == msg.source_service && ch.channel == msg.source_channel
             });
 
             if source_channel.is_none() {
+                // Determine if we should log this rejection (debug only)
+                // We don't have access to global debug flag here easily without config, 
+                // but unlikely to spam if it's not matching any bridge.
+                // For now, let's log valuable debug info if we can't find a bridge.
+                // Note: This matches EVERY bridge loop, so it would spam if we log "not found in bridge X".
                 continue;
             }
-
+            
+            matched_any_bridge = true;
             let source_config = source_channel.unwrap();
 
             // Check if we should bridge own messages
-            if msg.sender_id.contains(&msg.source_service) && !source_config.bridge_own_messages {
+            // We need to look up the service instance to check its config
+            let should_bridge_own = if let Some(service) = services.get(msg.source_service.as_str()) {
+                 let svc = service.lock().await;
+                 svc.should_bridge_own_messages()
+            } else {
+                false
+            };
+
+            if msg.sender_id.contains(&msg.source_service) && !should_bridge_own {
                 continue;
             }
 
@@ -91,9 +115,10 @@ impl BridgeCoordinator {
             // Forward to all other channels in this bridge
             for target_channel in channels {
                 // Skip the source channel
-                if target_channel.service == msg.source_service
-                    && target_channel.channel == msg.source_channel
-                {
+                let same_service = target_channel.service == msg.source_service;
+                let same_channel = target_channel.channel == msg.source_channel;
+                
+                if same_service && same_channel {
                     continue;
                 }
 
@@ -125,6 +150,11 @@ impl BridgeCoordinator {
                     );
                 }
             }
+        }
+        
+        if !matched_any_bridge {
+            warn!("[Bridge] Message dropped: No bridge found for Service: '{}', Channel: '{}' (Sender: {})", 
+                msg.source_service, msg.source_channel, msg.sender);
         }
     }
 }

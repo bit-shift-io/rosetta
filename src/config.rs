@@ -28,28 +28,33 @@ pub struct MatrixServiceConfig {
     pub username: String,
     pub password: String,
     #[serde(default)]
+    #[allow(dead_code)]
+    pub device_id: Option<String>,
+    #[serde(default)]
     pub debug: bool,
+    #[serde(default)] // Defaults to false
+    pub bridge_own_messages: bool,
 }
 
 /// WhatsApp-specific service configuration
 #[derive(Debug, Deserialize, Clone)]
 pub struct WhatsAppServiceConfig {
     #[serde(default)]
+    pub session_path: Option<String>,
+    #[serde(default)]
     pub debug: bool,
-    #[serde(default = "default_whatsapp_db")]
-    pub database_path: String,
-}
-
-fn default_whatsapp_db() -> String {
-    "whatsapp.db".to_string()
+    #[serde(default)] // Defaults to false
+    pub bridge_own_messages: bool,
 }
 
 /// Discord-specific service configuration
 #[derive(Debug, Deserialize, Clone)]
 pub struct DiscordServiceConfig {
+    pub bot_token: String,
     #[serde(default)]
     pub debug: bool,
-    pub token: Option<String>,
+    #[serde(default)] // Defaults to false
+    pub bridge_own_messages: bool,
 }
 
 /// Channel configuration within a bridge
@@ -59,9 +64,6 @@ pub struct ChannelConfig {
     pub service: String,
     /// Channel/room identifier (protocol-specific format)
     pub channel: String,
-    /// Whether to bridge messages sent by this service's own user
-    #[serde(default)]
-    pub bridge_own_messages: bool,
     /// Whether to include display names in forwarded messages
     #[serde(default = "default_true")]
     pub display_names: bool,
@@ -82,6 +84,7 @@ impl Config {
     }
     
     /// Get a service configuration by name
+    #[allow(dead_code)]
     pub fn get_service(&self, name: &str) -> Option<&ServiceConfig> {
         self.services.get(name)
     }

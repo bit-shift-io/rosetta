@@ -37,13 +37,14 @@ impl WhatsAppService {
 #[async_trait]
 impl Service for WhatsAppService {
     async fn connect(&mut self) -> Result<()> {
-        let backend = SqliteStore::new(&self.config.database_path).await?;
-        let backend = Arc::new(backend);
+        let database_path = self.config.session_path.clone().unwrap_or_else(|| "whatsapp.db".to_string());
+        let backend = SqliteStore::new(&database_path).await?;
+        let backend_arc = Arc::new(backend); // Keep Arc for bot builder
         let transport = TokioWebSocketTransportFactory::new();
         let http = UreqHttpClient::new();
 
         let bot = Bot::builder()
-            .with_backend(backend)
+            .with_backend(backend_arc.clone()) // Use the Arc'd backend
             .with_transport_factory(transport)
             .with_http_client(http)
             .build()
@@ -57,13 +58,18 @@ impl Service for WhatsAppService {
     }
 
     async fn start(&mut self, tx: mpsc::Sender<ServiceMessage>) -> Result<()> {
-        let backend = SqliteStore::new(&self.config.database_path).await?;
-        let backend = Arc::new(backend);
         let transport = TokioWebSocketTransportFactory::new();
         let http = UreqHttpClient::new();
         
         let service_name = self.name.clone();
         let debug = self.config.debug;
+
+        // Client initialization is handled by Bot::builder below
+
+        
+        let database_path = self.config.session_path.clone().unwrap_or_else(|| "whatsapp.db".to_string());
+        let backend = SqliteStore::new(&database_path).await?;
+        let backend = Arc::new(backend);
         
         let mut bot = Bot::builder()
             .with_backend(backend)
@@ -160,6 +166,10 @@ impl Service for WhatsAppService {
 
     fn service_name(&self) -> &str {
         &self.name
+    }
+
+    fn should_bridge_own_messages(&self) -> bool {
+        self.config.bridge_own_messages
     }
 
     async fn disconnect(&mut self) -> Result<()> {

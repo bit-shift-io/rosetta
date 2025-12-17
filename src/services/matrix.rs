@@ -32,6 +32,7 @@ impl MatrixService {
         }
     }
     
+    #[allow(dead_code)]
     pub fn client(&self) -> Option<&MatrixClient> {
         self.client.as_ref()
     }
@@ -89,12 +90,17 @@ impl Service for MatrixService {
         client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
             let tx = tx.clone();
             let service_name = service_name.clone();
-            let _my_user_id = my_user_id.clone();
+            let my_user_id = my_user_id.clone();
             let recent_ids = recent_ids_handler.clone();
             
             async move {
+                // Ignore own messages (Critical for preventing loops)
+                if event.sender == my_user_id {
+                    return;
+                }
+
                 if debug {
-                    info!("[Matrix DEBUG] Event received from {}: {:?}", event.sender, event.content.msgtype);
+                    info!("[Matrix] Event received from {}: {:?}", event.sender, event.content.msgtype);
                 }
 
                 // Check deduplication
@@ -102,7 +108,7 @@ impl Service for MatrixService {
                     let ids = recent_ids.lock().unwrap();
                     if ids.contains(&event.event_id) {
                         if debug { 
-                            info!("[Matrix DEBUG] Ignoring loop (event sent by us): {}", event.event_id); 
+                            info!("[Matrix] Ignoring loop (event sent by us): {}", event.event_id); 
                         }
                         return;
                     }
@@ -142,7 +148,10 @@ impl Service for MatrixService {
                         source_channel: room.room_id().to_string(),
                     };
                     
-                    let _ = tx.send(msg).await;
+                    match tx.send(msg).await {
+                        Ok(_) => if debug { info!("[Matrix DEBUG] Msg accepted by Bridge"); },
+                        Err(e) => error!("[Matrix] Failed to send msg to Bridge: {}", e),
+                    }
                 } else if debug {
                     info!("[Matrix DEBUG] Ignored non-text message");
                 }
@@ -195,6 +204,10 @@ impl Service for MatrixService {
 
     fn service_name(&self) -> &str {
         &self.name
+    }
+
+    fn should_bridge_own_messages(&self) -> bool {
+        self.config.bridge_own_messages
     }
 
     async fn disconnect(&mut self) -> Result<()> {

@@ -14,7 +14,9 @@ services:
 
   discord_direct:
     protocol: discord
+    bot_token: "your_discord_bot_token_here"
     debug: true
+    bridge_own_messages: false
 
 # bridges are connections between channels/rooms
 # you can link between as many services and channels as you like
@@ -23,13 +25,11 @@ bridges:
   family_bridge:
     - service: matrix_bot
       channel: "!room:matrix.org"
-      bridge_own_messages: true
       display_names: true
       aliases:
         "@user:matrix.org": "Bob"
-    - service: whatsapp_direct
+    - service: whatsapp_bot
       channel: "00000@lid"
-      bridge_own_messages: true
       display_names: true
       aliases:
         "1234567890@s.whatsapp.net": "Alice"
@@ -38,9 +38,7 @@ bridges:
   rpg_bridge:
     - service: matrix_bot
       channel: "!room:matrix.org"
-      bridge_own_messages: true
       display_names: true
-    - service: discord_bridge
-      channel: "00000@lid"
-      bridge_own_messages: true
+    - service: discord_direct
+      channel: "1234567890"  # Discord channel ID (right-click channel -> Copy ID)
       display_names: true

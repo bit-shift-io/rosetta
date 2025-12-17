@@ -30,10 +30,17 @@ pub trait Service: Send + Sync {
     /// Send a message to a specific channel on this service
     async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<()>;
     
+    /// Whether this service should bridge its own messages
+    fn should_bridge_own_messages(&self) -> bool {
+        false
+    }
+    
     /// Get the service name
+    #[allow(dead_code)]
     fn service_name(&self) -> &str;
     
     /// Disconnect from the service
+    #[allow(dead_code)]
     async fn disconnect(&mut self) -> Result<()>;
 }
 

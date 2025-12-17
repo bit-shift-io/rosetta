@@ -17,10 +17,17 @@ use bridge::BridgeCoordinator;
 async fn main() -> Result<()> {
     // Initialize logger with filters to reduce noise
     let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
-    // Silence WhatsApp transport logs
+    
+    // Silence noisy libraries
     builder.filter_module("whatsapp_rust", log::LevelFilter::Warn);
     builder.filter_module("whatsapp_rust_tokio_transport", log::LevelFilter::Warn);
     builder.filter_module("whatsapp_rust_ureq_http_client", log::LevelFilter::Warn);
+    builder.filter_module("matrix_sdk_base", log::LevelFilter::Warn);
+    builder.filter_module("matrix_sdk_crypto", log::LevelFilter::Warn);
+    builder.filter_module("ruma_common", log::LevelFilter::Warn);
+    builder.filter_module("tracing", log::LevelFilter::Warn);
+    builder.filter_module("serenity", log::LevelFilter::Warn);
+    
     builder.init();
 
     // Load configuration

@@ -1,99 +1,82 @@
 # Rosetta
 
-A Rust-based bridge that connects a Matrix room with a WhatsApp chat (process or group). This bot listens for messages on both platforms and forwards them to the other, enabling seamless communication.
+Rosetta is a modular, multi-protocol chat bridge written in Rust. It connects different chat services (Matrix, WhatsApp, Discord) together, allowing seamless communication across platforms.
 
 ## Features
 
-*   **Bidirectional Bridging**: Messages flow from Matrix to WhatsApp and vice versa.
-*   **Media Support**: Currently focuses on text messages (extensible for media).
-*   **Secure**: Uses `matrix-sdk` for end-to-end encryption support (if configured) and `whatsapp-rust` which implements the WhatsApp protocol.
+*   **Multi-Service Support**: Connects Matrix, WhatsApp, and Discord.
+*   **Flexible Bridging**: Define multiple bridges to link specific channels/rooms across services.
+*   **Aliases**: Map user IDs to readable display names per channel.
+*   **Secure**: Uses `matrix-sdk` for E2EE support and runs locally.
+*   **Loop Prevention**: Intelligent bridging logic prevents infinite message loops between bots.
 
-## Dependencies
+## Supported Services
 
-This project relies on the following Rust crates:
+*   **Matrix**: Full generic client support (via `matrix-sdk`).
+*   **WhatsApp**: Web client emulation (via `whatsapp-rust`).
+*   **Discord**: Bot integration (via `serenity`).
 
-*   **`anyhow`**: Flexible error handling for easy result propagation.
-*   **`dotenvy`**: Loads environment variables from a `config.yaml` file for configuration.
-*   **`env_logger`**: Configures logging via environment variables.
-*   **`log`**: Lightweight logging facade.
-*   **`matrix-sdk`**: The official Matrix Client-Server SDK for Rust (v0.16.0), handling Matrix protocol interactions.
-*   **`tokio`**: An asynchronous runtime for Rust, essential for handling concurrent tasks (connecting to both services simultaneously).
-*   **`whatsapp-rust`** (and related crates): A Rust implementation of the WhatsApp protocol (sourced via git, branch `main`).
-    *   `wacore`: Core types and functional logic.
-    *   `wacore-binary`: Binary data handling.
-    *   `waproto`: Protocol buffer definitions for WhatsApp.
-    *   `whatsapp-rust-tokio-transport`: WebSocket transport layer using Tokio.
-    *   `whatsapp-rust-ureq-http-client`: HTTP client modules using ureq.
+## Prerequisites
 
+*   **Rust**: Nightly toolchain is required (due to `whatsapp-rust` dependencies).
+*   **Matrix Account**: A dedicated bot account is recommended.
+*   **WhatsApp Account**: You will need to scan a QR code to link the session.
+*   **Discord Bot**: You need a Bot Token and **Privileged Gateway Intents** (Message Content, Server Members, Presence) enabled in the Discord Developer Portal.
 
-## Setup & Running
+## Configuration
 
-### Prerequisites
+Rosetta uses a `config.yaml` file for all settings.
 
-*   Rust and Cargo installed (Nightly toolchain required).
-*   A Matrix account and a room to bridge.
-*   A WhatsApp account (linked via QR code).
-
-### 1. Clone & Configure
-
-1.  Clone this repository.
-2.  Create a `config.yaml` file in the root directory (you can copy `config_example.yaml`):
-
+1.  **Copy the example**:
     ```bash
     cp config_example.yaml config.yaml
     ```
+2.  **Edit `config.yaml`**:
 
-3.  Edit `config.yaml` with your credentials:
+    The configuration has two main sections:
+    *   **`services`**: Define your bot accounts (Matrix login, Discord token, etc.).
+    *   **`bridges`**: Define which channels talk to each other.
 
+    **Example Snippet:**
     ```yaml
-    matrix:
-      homeserver_url: "https://matrix.org"
-      username: "your_user"
-      password: "your_password"
-      room_id: "!your_room_id:matrix.org"
-      debug: true
-      aliases:
-        "@user:matrix.org": "Me"
+    services:
+      my_matrix_bot:
+        protocol: matrix
+        homeserver_url: "https://matrix.org"
+        username: "startrek_bridge_bot"
+        password: "secure_password"
+        bridge_own_messages: false # Always false for bots
 
-    whatsapp:
-      target_id: "1234567890@s.whatsapp.net"
-      debug: true
-      bridge_own_messages: true
-      aliases:
-        "1234567890@s.whatsapp.net": "Alice"
-        "00000000@lid": "Bob"
+      my_discord_bot:
+        protocol: discord
+        bot_token: "YOUR_DISCORD_TOKEN"
+        bridge_own_messages: false
+
+    bridges:
+      general_chat:
+        - service: my_matrix_bot
+          channel: "!roomid:matrix.org"
+          display_names: true
+        - service: my_discord_bot
+          channel: "1234567890" # Channel ID
+          display_names: true
     ```
 
-    *   **Aliases**: Map IDs (JIDs or UserIDs) to display names.
-        *   Keys must be quoted if they contain special characters (like `@`).
-        *   Values are the names that will appear in the bridged message.
-    *   **Debugging**: Set `debug: true` for detailed logs.
-    
-### How to find the WhatsApp JID
+    > **Tip**: See `config_example.yaml` for full options including Aliases.
 
-If you don't know the `WHATSAPP_ID_TO_BRIDGE`, follow these steps:
+## Running
 
-1.  Set a dummy value in `config.yaml` (e.g., `WHATSAPP_ID_TO_BRIDGE=dummy`).
-2.  Run the bot (`cargo run`) and link your WhatsApp account via QR code.
-3.  Send a message to the person or group you want to bridge from your phone.
-4.  Check the bot's terminal output. You will see a log line like:
-    `INFO: Received WhatsApp message from JID: 1234567890@s.whatsapp.net`
-5.  Copy this JID and update your `config.yaml` file.
-6.  Restart the bot.
+1.  **Build and Run**:
+    ```bash
+    cargo run
+    ```
+2.  **First Run**:
+    *   If using WhatsApp, a QR code will appear in the terminal. Scan it with your phone (Linked Devices).
 
-### 2. Run the Bot
+## Development
 
-Execute the project using Cargo:
-
-```bash
-cargo run
-```
-
-### 3. Authenticate WhatsApp
-
-On the first run, the bot will display a QR code in the terminal.
-1.  Open WhatsApp on your mobile device.
-2.  Go to **Linked Devices** > **Link a Device**.
-3.  Scan the QR code.
-
-Once connected, the bot will start forwarding messages between the configured Matrix room and WhatsApp chat.
+*   **Dependencies**: managed in `Cargo.toml`.
+*   **Architecture**:
+    *   `src/main.rs`: Entry point and service initialization.
+    *   `src/bridge.rs`: Core bridging logic and message routing.
+    *   `src/services/`: Protocol-specific implementations (Service trait).
