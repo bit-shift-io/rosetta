@@ -13,7 +13,7 @@ A Rust-based bridge that connects a Matrix room with a WhatsApp chat (process or
 This project relies on the following Rust crates:
 
 *   **`anyhow`**: Flexible error handling for easy result propagation.
-*   **`dotenvy`**: Loads environment variables from a `.env` file for configuration.
+*   **`dotenvy`**: Loads environment variables from a `config.yaml` file for configuration.
 *   **`env_logger`**: Configures logging via environment variables.
 *   **`log`**: Lightweight logging facade.
 *   **`matrix-sdk`**: The official Matrix Client-Server SDK for Rust (v0.16.0), handling Matrix protocol interactions.
@@ -61,7 +61,7 @@ This project relies on the following Rust crates:
       bridge_own_messages: true
       aliases:
         "1234567890@s.whatsapp.net": "Alice"
-        "97809944584205@lid": "Bronson"
+        "00000000@lid": "Bob"
     ```
 
     *   **Aliases**: Map IDs (JIDs or UserIDs) to display names.
@@ -73,12 +73,12 @@ This project relies on the following Rust crates:
 
 If you don't know the `WHATSAPP_ID_TO_BRIDGE`, follow these steps:
 
-1.  Set a dummy value in `.env` (e.g., `WHATSAPP_ID_TO_BRIDGE=dummy`).
+1.  Set a dummy value in `config.yaml` (e.g., `WHATSAPP_ID_TO_BRIDGE=dummy`).
 2.  Run the bot (`cargo run`) and link your WhatsApp account via QR code.
 3.  Send a message to the person or group you want to bridge from your phone.
 4.  Check the bot's terminal output. You will see a log line like:
     `INFO: Received WhatsApp message from JID: 1234567890@s.whatsapp.net`
-5.  Copy this JID and update your `.env` file.
+5.  Copy this JID and update your `config.yaml` file.
 6.  Restart the bot.
 
 ### 2. Run the Bot

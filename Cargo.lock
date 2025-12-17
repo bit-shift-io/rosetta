@@ -3203,6 +3203,7 @@ name = "rosetta"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "dotenvy",
  "env_logger",
  "log",

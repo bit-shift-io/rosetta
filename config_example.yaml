@@ -1,16 +1,46 @@
-matrix:
-  homeserver_url: "https://matrix.org"
-  username: "your_user"
-  password: "your_password"
-  room_id: "!your_room_id:matrix.org"
-  debug: true
-  aliases:
-    "@bronson:matrix.org": "Bronson"
+# services have a name, and their connection settings
+# you may have multiple services of the same protocol
+services:
+  matrix_bot:
+    protocol: matrix
+    homeserver_url: "https://matrix.org"
+    username: "user"
+    password: "pass"
+    debug: true
 
-whatsapp:
-  target_id: "1234567890@s.whatsapp.net"
-  debug: true
-  bridge_own_messages: true
-  aliases:
-    "1234567890@s.whatsapp.net": "Alice"
-    "97809944584205@lid": "MySelf"
+  whatsapp_direct:
+    protocol: whatsapp
+    debug: true
+
+  discord_direct:
+    protocol: discord
+    debug: true
+
+# bridges are connections between channels/rooms
+# you can link between as many services and channels as you like
+# aliases will override user names
+bridges:
+  family_bridge:
+    - service: matrix_bot
+      channel: "!room:matrix.org"
+      bridge_own_messages: true
+      display_names: true
+      aliases:
+        "@user:matrix.org": "Bob"
+    - service: whatsapp_direct
+      channel: "00000@lid"
+      bridge_own_messages: true
+      display_names: true
+      aliases:
+        "1234567890@s.whatsapp.net": "Alice"
+        "00000@lid": "MySelf"
+
+  rpg_bridge:
+    - service: matrix_bot
+      channel: "!room:matrix.org"
+      bridge_own_messages: true
+      display_names: true
+    - service: discord_bridge
+      channel: "00000@lid"
+      bridge_own_messages: true
+      display_names: true
