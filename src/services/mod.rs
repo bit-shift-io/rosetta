@@ -54,6 +54,12 @@ pub trait Service: Send + Sync {
         true
     }
     
+    /// Get list of members in a channel/room (names)
+    /// Returns empty list if not supported or failed
+    async fn get_room_members(&self, _channel: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
+    
     /// Disconnect from the service
     #[allow(dead_code)]
     async fn disconnect(&mut self) -> Result<()>;

@@ -235,6 +235,7 @@ pub struct DiscordService {
     config: DiscordServiceConfig,
     client: Option<Arc<TokioMutex<Client>>>,
     http: Option<Arc<serenity::http::Http>>,
+    cache: Option<Arc<serenity::cache::Cache>>,
 }
 
 impl DiscordService {
@@ -244,6 +245,7 @@ impl DiscordService {
             config,
             client: None,
             http: None,
+            cache: None,
         }
     }
 }
@@ -259,7 +261,9 @@ impl Service for DiscordService {
     async fn start(&mut self, tx: mpsc::Sender<ServiceMessage>) -> Result<()> {
         let intents = GatewayIntents::GUILD_MESSAGES
             | GatewayIntents::DIRECT_MESSAGES
-            | GatewayIntents::MESSAGE_CONTENT;
+            | GatewayIntents::MESSAGE_CONTENT
+            | GatewayIntents::GUILD_MEMBERS
+            | GatewayIntents::GUILDS; // Needed for caching channels/guilds
 
         let handler = DiscordHandler {
             tx,
@@ -273,6 +277,7 @@ impl Service for DiscordService {
 
         // Cache the HTTP client for sending messages without locking the full Client
         self.http = Some(client.http.clone());
+        self.cache = Some(client.cache.clone());
 
         let client = Arc::new(TokioMutex::new(client));
         self.client = Some(client.clone());
@@ -367,6 +372,88 @@ impl Service for DiscordService {
 
     fn is_connected(&self) -> bool {
         self.client.is_some() && self.http.is_some()
+    }
+
+    async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
+         let cache = self.cache.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Discord Cache not initialized"))?;
+            
+         let channel_id: u64 = channel.parse()?;
+         let channel_id = ChannelId::new(channel_id);
+         
+         // SCOPE 1: Get Guild ID and Cached Members
+         // We use a block to ensure CacheRef (guild_channel, guild) are dropped before any await
+         let (guild_id_method, mut names) = {
+             #[allow(deprecated)]
+             if let Some(guild_channel) = cache.channel(channel_id) {
+                let guild_id = guild_channel.guild_id;
+                let mut current_names = Vec::new();
+                
+                // Get the full guild from cache to access members
+                if let Some(guild) = cache.guild(guild_id) {
+                    // Strategy 1: Check Cached Members
+                    for (_user_id, member) in &guild.members {
+                        let perms = guild.user_permissions_in(&*guild_channel, member);
+                        if perms.contains(serenity::model::permissions::Permissions::VIEW_CHANNEL) {
+                            current_names.push(member.display_name().to_string());
+                        }
+                    }
+                }
+                (Some(guild_id), current_names)
+             } else {
+                 (None, Vec::new())
+             }
+         }; 
+
+         // Handle case where channel wasn't found in cache at all
+         let guild_id = match guild_id_method {
+             Some(gid) => gid,
+             None => return Ok(vec!["Channel not found in cache (Bot starting up?)".to_string()]),
+         };
+
+         // SCOPE 2: HTTP Fallback (Async)
+         // Only run if we found few members (likely just the bot)
+         if names.len() <= 1 {
+             if let Some(http) = self.http.as_ref() {
+                 // Fetch up to 1000 members via API. Safe to await here as CacheRefs are gone.
+                 if let Ok(http_members) = guild_id.members(http, Some(1000), None).await {
+                     // SCOPE 3: Re-acquire CacheRefs to filter the HTTP results
+                     #[allow(deprecated)]
+                     if let Some(guild_channel) = cache.channel(channel_id) {
+                          if let Some(guild) = cache.guild(guild_id) {
+                              names.clear(); // Restart list with authoritative data
+                              for member in http_members {
+                                 // Calculate permissions for this HTTP member using cached Guild structure
+                                 let perms = guild.user_permissions_in(&*guild_channel, &member);
+                                 if perms.contains(serenity::model::permissions::Permissions::VIEW_CHANNEL) {
+                                     names.push(member.display_name().to_string());
+                                 }
+                              }
+                          }
+                     }
+                 }
+             }
+         }
+         
+         // Sort for consistency
+         names.sort();
+         names.dedup(); 
+                
+         // Pagination logic for display
+         let total = names.len();
+         
+         if total <= 1 {
+              names.push("(Found no members with access. Check 'Server Members Intent' and Bot Permissions)".to_string());
+         }
+         
+         let display_names: Vec<String> = names.into_iter().take(50).collect();
+         let mut result = display_names;
+         
+         if total > 50 {
+             result.push(format!("...and {} more", total - 50));
+         }
+         
+         Ok(result)
     }
 
     async fn disconnect(&mut self) -> Result<()> {

@@ -322,6 +322,27 @@ impl Service for MatrixService {
         self.client.is_some()
     }
 
+    async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
+        let client = self.client.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
+            
+        let room_id = <&RoomId>::try_from(channel)?;
+        
+        if let Some(room) = client.get_room(room_id) {
+            let members = room.members_no_sync(matrix_sdk::RoomMemberships::JOIN).await?;
+            let mut names = Vec::new();
+            for member in members.iter().take(50) { // Limit to 50
+                names.push(member.display_name().unwrap_or(member.user_id().as_str()).to_string());
+            }
+            if members.len() > 50 {
+                names.push(format!("...and {} more", members.len() - 50));
+            }
+            Ok(names)
+        } else {
+            Ok(vec!["Room not found".to_string()])
+        }
+    }
+
     async fn disconnect(&mut self) -> Result<()> {
         // Matrix SDK doesn't require explicit disconnect
         info!("[Matrix:{}] Disconnecting", self.name);

@@ -100,20 +100,45 @@ impl BridgeCoordinator {
                 info!("Status command received in bridge '{}'", bridge_name);
                 
                 let mut status_lines = Vec::new();
-                status_lines.push(format!("Bridge Status: **{}**", bridge_name));
+                status_lines.push(format!("**Bridge Status: {}**", bridge_name));
                 
-                // Check status of all unique services in this bridge
-                let mut checked_services = Vec::new(); // Avoid duplicate checks
+                // 1. Service Health Section
+                status_lines.push("\n**Services**".to_string());
+                let mut checked_services = Vec::new(); 
                 for ch in channels {
                     if !checked_services.contains(&ch.service) {
                          if let Some(svc_lock) = services.get(ch.service.as_str()) {
                              let svc = svc_lock.lock().await;
-                             let status = if svc.is_connected() { "Connected" } else { "Disconnected" };
-                             status_lines.push(format!("- {}: {}", ch.service, status));
+                             let status = if svc.is_connected() { "✅ Connected" } else { "❌ Disconnected" };
+                             status_lines.push(format!("* **{}**: {}", ch.service, status));
                          } else {
-                             status_lines.push(format!("- {}: Service Not Found", ch.service));
+                             status_lines.push(format!("* **{}**: ❓ Service Not Found", ch.service));
                          }
                          checked_services.push(ch.service.clone());
+                    }
+                }
+                
+                // 2. Room Members Section
+                status_lines.push("\n**Rooms**".to_string());
+                for ch in channels {
+                    if let Some(svc_lock) = services.get(ch.service.as_str()) {
+                        let svc = svc_lock.lock().await;
+                        status_lines.push(format!("\n**{}:{}**", ch.service, ch.channel));
+                        
+                        match svc.get_room_members(&ch.channel).await {
+                            Ok(members) => {
+                                if members.is_empty() {
+                                    status_lines.push("* *(No members found or not supported)*".to_string());
+                                } else {
+                                    for member in members {
+                                        status_lines.push(format!("* {}", member));
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                status_lines.push(format!("* *Error fetching members: {}*", e));
+                            }
+                        }
                     }
                 }
                 
