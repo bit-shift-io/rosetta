@@ -64,10 +64,13 @@ pub struct ChannelConfig {
     pub service: String,
     /// Channel/room identifier (protocol-specific format)
     pub channel: String,
-    /// Whether to include display names in forwarded messages
+    /// Whether to bridge display names in forwarded messages
     #[serde(default = "default_true")]
     pub display_names: bool,
-    /// User aliases: maps user IDs to custom display names
+    /// Whether to enable media bridging (images, etc.) for this channel
+    #[serde(default = "default_true")]
+    pub enable_media: bool,
+    /// Map of User ID -> Display Name aliases
     #[serde(default)]
     pub aliases: HashMap<String, String>,
 }

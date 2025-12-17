@@ -123,25 +123,25 @@ impl BridgeCoordinator {
                 }
 
                 // Get the target service
-                if let Some(service) = services.get(&target_channel.service) {
-                    let svc = service.lock().await;
-                    match svc.send_message(&target_channel.channel, &modified_msg).await {
-                        Ok(_) => {
-                            info!(
-                                "[Bridge:{}] Forwarded message from {}:{} to {}:{}",
-                                bridge_name,
-                                msg.source_service,
-                                msg.source_channel,
-                                target_channel.service,
-                                target_channel.channel
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                "[Bridge:{}] Failed to forward to {}:{}: {}",
-                                bridge_name, target_channel.service, target_channel.channel, e
-                            );
-                        }
+                if let Some(service_lock) = services.get(target_channel.service.as_str()) {
+                    let service = service_lock.lock().await;
+                    
+                    // Create outgoing message, optionally stripping media
+                    let mut outgoing_msg = modified_msg.clone();
+                    if !target_channel.enable_media {
+                        outgoing_msg.attachments.clear();
+                    }
+                    
+                    info!("[Bridge:{}] Forwarded message from {}:{} to {}:{}", 
+                        bridge_name, 
+                        msg.source_service, msg.source_channel,
+                        target_channel.service, target_channel.channel
+                    );
+
+                    // Send the message
+                    if let Err(e) = service.send_message(&target_channel.channel, &outgoing_msg).await {
+                        error!("[Bridge:{}] Failed to forward to {}:{}: {}", 
+                            bridge_name, target_channel.service, target_channel.channel, e);
                     }
                 } else {
                     warn!(

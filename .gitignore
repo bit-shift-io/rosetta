@@ -4,6 +4,7 @@
 # Configuration / Secrets
 .env
 config.yaml
+/data/
 
 # WhatsApp Database (Local SQLite)
 *.db

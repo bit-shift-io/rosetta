@@ -1,16 +1,18 @@
 use async_trait::async_trait;
 use anyhow::Result;
 use log::{info, error, warn};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::{
+    Client as MatrixClient,
     config::SyncSettings,
-    room::Room,
     ruma::{
-        events::room::message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
+        events::room::message::{OriginalSyncRoomMessageEvent, RoomMessageEventContent, MessageType},
         RoomId, OwnedEventId,
     },
-    Client as MatrixClient,
+    Room,
 };
 use crate::services::{Service, ServiceMessage};
 use crate::config::MatrixServiceConfig;
@@ -86,12 +88,14 @@ impl Service for MatrixService {
         
         let my_user_id = client.user_id().unwrap().to_owned();
         let recent_ids_handler = recent_event_ids.clone();
+        let safe_client = client.clone(); // Clone for the handler
         
         client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
             let tx = tx.clone();
             let service_name = service_name.clone();
             let my_user_id = my_user_id.clone();
             let recent_ids = recent_ids_handler.clone();
+            let safe_client = safe_client.clone();
             
             async move {
                 // Ignore own messages (Critical for preventing loops)
@@ -114,7 +118,7 @@ impl Service for MatrixService {
                     }
                 }
 
-                // Filter old messages (history)
+                // Filter old messages
                 let event_ts_millis: u64 = event.origin_server_ts.get().into();
                 let event_time = std::time::UNIX_EPOCH + std::time::Duration::from_millis(event_ts_millis);
                 
@@ -125,35 +129,88 @@ impl Service for MatrixService {
                     return;
                 }
 
-                if let MessageType::Text(text_content) = &event.content.msgtype {
-                    if debug {
-                        info!("[Matrix DEBUG] text message '{}', forwarding...", text_content.body);
+                // Handle different message types (Text and Image)
+                let (body, attachments) = match &event.content.msgtype {
+                    MessageType::Text(text_content) => {
+                        (text_content.body.clone(), vec![])
+                    },
+                    MessageType::Image(image_content) => {
+                        if debug { info!("[Matrix] Received image: {}", image_content.body); }
+                        
+                        // Download the image
+                         let mut attachments = Vec::new();
+                         let source = &image_content.source;
+                         
+                         // Correct usage based on matrix-sdk 0.7+ API patterns
+                         // We use the media client from the logged-in client
+                         let media_client = safe_client.media();
+                         
+                         // matrix-sdk's `get_media_content` expects a `MediaRequestParameters`
+                         let params = MediaRequestParameters {
+                             source: source.clone(),
+                             format: MediaFormat::File,
+                         };
+                         
+                         match media_client.get_media_content(&params, true).await {
+                             Ok(bytes) => {
+                                 let mime = image_content.info.as_ref()
+                                     .and_then(|i| i.mimetype.clone())
+                                     .unwrap_or("image/jpeg".to_string()); // Default fallback
+                                     
+                                 let mut filename = image_content.body.clone();
+                                 // Ensure extension matches mime (fixes Discord rendering for things like Tenor GIFs)
+                                 let extension = match mime.as_str() {
+                                     "image/jpeg" | "image/jpg" => ".jpg",
+                                     "image/png" => ".png",
+                                     "image/gif" => ".gif",
+                                     "image/webp" => ".webp",
+                                     _ => "",
+                                 };
+                                 
+                                 if !extension.is_empty() && !filename.to_lowercase().ends_with(extension) {
+                                     filename.push_str(extension);
+                                 }
+                                     
+                                 attachments.push(crate::services::Attachment {
+                                     filename,
+                                     mime_type: mime,
+                                     data: bytes,
+                                 });
+                             },
+                             Err(e) => error!("[Matrix] Failed to download media: {}", e),
+                         }
+                         
+                        (image_content.body.clone(), attachments)
+                    },
+                     // Add other types later (Video, etc.)
+                    _ => {
+                        if debug { info!("[Matrix] Ignored unsupported message type"); }
+                        return;
                     }
-                    
-                    let sender_id = event.sender.to_string();
-                    
-                    // Get display name from room member
-                    let display_name = match room.get_member(&event.sender).await {
-                        Ok(Some(member)) => member.display_name()
-                            .map(|s| s.to_owned())
-                            .unwrap_or_else(|| event.sender.to_string()),
-                        _ => event.sender.to_string(),
-                    };
+                };
 
-                    let msg = ServiceMessage {
-                        sender: display_name,
-                        sender_id: sender_id.clone(),
-                        content: text_content.body.clone(),
-                        source_service: service_name.clone(),
-                        source_channel: room.room_id().to_string(),
-                    };
-                    
-                    match tx.send(msg).await {
-                        Ok(_) => if debug { info!("[Matrix DEBUG] Msg accepted by Bridge"); },
-                        Err(e) => error!("[Matrix] Failed to send msg to Bridge: {}", e),
-                    }
-                } else if debug {
-                    info!("[Matrix DEBUG] Ignored non-text message");
+                let sender_id = event.sender.to_string();
+                
+                // Get display name from room member
+                let display_name = match room.get_member(&event.sender).await {
+                    Ok(Some(member)) => member.display_name()
+                        .map(|s: &str| s.to_string())
+                        .unwrap_or_else(|| event.sender.to_string()),
+                    _ => event.sender.to_string(),
+                };
+
+                let msg = ServiceMessage {
+                    sender: display_name,
+                    sender_id: sender_id.clone(),
+                    content: body, // Use the body resolved above
+                    attachments,   // Use attachments resolved above
+                    source_service: service_name.clone(),
+                    source_channel: room.room_id().to_string(),
+                };
+                
+                match tx.send(msg).await {
+                    Ok(_) => {}, // Success
+                    Err(e) => error!("[Matrix] Failed to send msg to Bridge: {}", e),
                 }
             }
         });
@@ -185,14 +242,36 @@ impl Service for MatrixService {
         let room_id = <&RoomId>::try_from(channel)?;
         
         if let Some(room) = client.get_room(room_id) {
-            let content = RoomMessageEventContent::text_plain(
-                format!("{}: {}", message.sender, message.content)
-            );
+            // 1. Send text content (if not empty or no attachments - ensuring at least something is sent)
             
-            let resp = room.send(content).await?;
+            if !message.content.is_empty() {
+                 let content = RoomMessageEventContent::text_plain(
+                    format!("{}: {}", message.sender, message.content)
+                );
+                room.send(content).await?;
+            }
+
+            // 2. Send attachments
+            for attachment in &message.attachments {
+                // Determine mime type enum
+                let mime = mime::Mime::from_str(&attachment.mime_type).unwrap_or(mime::APPLICATION_OCTET_STREAM);
+                
+                // room.send_attachment handles upload and event creation
+                // We construct the attachment config
+                let config = matrix_sdk::attachment::AttachmentConfig::new();
+                
+                if let Err(e) = room.send_attachment(
+                    &attachment.filename,
+                    &mime,
+                    attachment.data.clone(), // Clone data as required by send_attachment
+                    config,
+                ).await {
+                    error!("[Matrix] Failed to send attachment {}: {}", attachment.filename, e);
+                }
+            }
             
             if self.config.debug {
-                info!("[Matrix DEBUG] Successfully sent to {}! EventID: {}", channel, resp.event_id);
+                info!("[Matrix] Successfully sent message to {}", channel);
             }
             
             Ok(())

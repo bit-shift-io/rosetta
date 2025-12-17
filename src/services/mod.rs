@@ -2,6 +2,14 @@ use async_trait::async_trait;
 use anyhow::Result;
 use tokio::sync::mpsc;
 
+/// Represents a file attachment (image, video, etc.)
+#[derive(Debug, Clone)]
+pub struct Attachment {
+    pub filename: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
 /// Common message structure for cross-service communication
 #[derive(Debug, Clone)]
 pub struct ServiceMessage {
@@ -11,6 +19,8 @@ pub struct ServiceMessage {
     pub sender_id: String,
     /// The message content
     pub content: String,
+    /// Optional file attachments
+    pub attachments: Vec<Attachment>,
     /// Source service name
     pub source_service: String,
     /// Source channel identifier

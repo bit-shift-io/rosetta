@@ -42,10 +42,29 @@ impl EventHandler for DiscordHandler {
             info!("[Discord DEBUG] Message received from {} (id: {}): {}", display_name, msg.author.id, msg.content);
         }
 
+        // Handle attachments
+        let mut attachments = Vec::new();
+        for attachment in &msg.attachments {
+            if let Ok(response) = reqwest::get(&attachment.url).await {
+                if let Ok(bytes) = response.bytes().await {
+                    attachments.push(crate::services::Attachment {
+                        filename: attachment.filename.clone(),
+                        mime_type: attachment.content_type.clone().unwrap_or_else(|| "application/octet-stream".to_string()),
+                        data: bytes.to_vec(),
+                    });
+                } else {
+                    error!("[Discord] Failed to read attachment bytes for {}", attachment.filename);
+                }
+            } else {
+                error!("[Discord] Failed to download attachment from URL: {}", attachment.url);
+            }
+        }
+
         let service_msg = ServiceMessage {
             sender: display_name,
             sender_id: msg.author.id.to_string(),
             content: msg.content.clone(),
+            attachments,
             source_service: self.service_name.clone(),
             source_channel: msg.channel_id.to_string(),
         };
@@ -145,12 +164,33 @@ impl Service for DiscordService {
         // No lock needed as we use the cached Http client
         
         // Wrap the Future in a timeout to detect hangs
-        let send_future = channel_id.say(http, &formatted_message);
-        match tokio::time::timeout(std::time::Duration::from_secs(10), send_future).await {
+        // Create the message builder
+        let mut builder = serenity::builder::CreateMessage::new()
+            .content(&formatted_message);
+
+        // Add attachments if present
+        let mut files = Vec::new(); // Keep files in scope
+        
+        for attachment in &message.attachments {
+            let file = serenity::builder::CreateAttachment::bytes(
+                attachment.data.clone(), 
+                attachment.filename.clone()
+            );
+            files.push(file);
+        }
+        
+        if !files.is_empty() {
+             builder = builder.files(files);
+        }
+
+        // Send message using the HTTP API with timeout
+        // Wrap the Future in a timeout to detect hangs
+        let send_future = channel_id.send_message(http, builder);
+        match tokio::time::timeout(std::time::Duration::from_secs(30), send_future).await { // Increased timeout for uploads
             Ok(result) => {
                 match result {
                     Ok(_) => {
-                        info!("[Discord DEBUG] Successfully sent to channel {}", channel);
+                        // info!("[Discord DEBUG] Successfully sent to channel {}", channel);
                         Ok(())
                     },
                     Err(e) => {

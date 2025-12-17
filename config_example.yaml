@@ -8,6 +8,13 @@ services:
     password: "pass"
     debug: true
 
+  whatsapp:
+    protocol: whatsapp
+    # Path to store the session data.
+    # For Docker, use "data/whatsapp_session" to ensure it persists via the mounted volume.
+    session_path: "data/whatsapp_session"
+    debug: false
+
   whatsapp_direct:
     protocol: whatsapp
     debug: true
@@ -39,6 +46,8 @@ bridges:
     - service: matrix_bot
       channel: "!room:matrix.org"
       display_names: true
+      enable_media: true
     - service: discord_direct
       channel: "1234567890"  # Discord channel ID (right-click channel -> Copy ID)
       display_names: true
+      enable_media: false # Example: Disable media sending to Discord (text only)
