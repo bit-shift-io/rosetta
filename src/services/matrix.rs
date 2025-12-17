@@ -9,7 +9,7 @@ use matrix_sdk::{
     Client as MatrixClient,
     config::SyncSettings,
     ruma::{
-        events::room::message::{OriginalSyncRoomMessageEvent, RoomMessageEventContent, MessageType},
+        events::room::message::{OriginalSyncRoomMessageEvent, RoomMessageEventContent, MessageType, TextMessageEventContent},
         RoomId, OwnedEventId,
     },
     Room,
@@ -244,7 +244,12 @@ impl Service for MatrixService {
         if let Some(room) = client.get_room(room_id) {
             // 1. Send text content (if not empty or no attachments - ensuring at least something is sent)
             
-            if !message.content.is_empty() {
+            // 1. Send text content (ONLY if there are no attachments, otherwise text goes in caption)
+            let send_text = !message.content.is_empty() && message.attachments.is_empty();
+            
+
+
+            if send_text {
                  let content = RoomMessageEventContent::text_plain(
                     format!("{}: {}", message.sender, message.content)
                 );
@@ -258,7 +263,13 @@ impl Service for MatrixService {
                 
                 // room.send_attachment handles upload and event creation
                 // We construct the attachment config
-                let config = matrix_sdk::attachment::AttachmentConfig::new();
+                let caption = if message.content.is_empty() {
+                    format!("Sent by {}", message.sender)
+                } else {
+                    format!("{}: {}", message.sender, message.content)
+                };
+                let caption_content = TextMessageEventContent::plain(caption);
+                let config = matrix_sdk::attachment::AttachmentConfig::new().caption(Some(caption_content));
                 
                 if let Err(e) = room.send_attachment(
                     &attachment.filename,

@@ -3513,6 +3513,7 @@ dependencies = [
  "matrix-sdk",
  "mime",
  "qr2term",
+ "regex",
  "reqwest 0.11.27",
  "serde",
  "serde_yaml",

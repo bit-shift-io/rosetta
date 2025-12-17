@@ -185,7 +185,8 @@ impl Service for WhatsAppService {
             let jid = Jid::from_str(channel)?;
             
             // 1. Send text if present
-            if !message.content.is_empty() {
+            // 1. Send text if present AND no attachments (otherwise text goes in caption)
+            if !message.content.is_empty() && message.attachments.is_empty() {
                 let wa_message = wa::Message {
                     extended_text_message: Some(Box::new(wa::message::ExtendedTextMessage {
                         text: Some(format!("{}: {}", message.sender, message.content)),
@@ -221,6 +222,11 @@ impl Service for WhatsAppService {
                             file_enc_sha256: Some(upload.file_enc_sha256),
                             file_sha256: Some(upload.file_sha256),
                             file_length: Some(attachment.data.len() as u64),
+                            caption: Some(if message.content.is_empty() {
+                                format!("Sent by {}", message.sender)
+                            } else {
+                                format!("{}: {}", message.sender, message.content)
+                            }),
                             ..Default::default()
                         })),
                         ..Default::default()
