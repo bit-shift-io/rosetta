@@ -95,6 +95,52 @@ impl BridgeCoordinator {
                 continue;
             }
 
+            // Handle .status command
+            if msg.content.trim() == ".status" {
+                info!("Status command received in bridge '{}'", bridge_name);
+                
+                let mut status_lines = Vec::new();
+                status_lines.push(format!("Bridge Status: **{}**", bridge_name));
+                
+                // Check status of all unique services in this bridge
+                let mut checked_services = Vec::new(); // Avoid duplicate checks
+                for ch in channels {
+                    if !checked_services.contains(&ch.service) {
+                         if let Some(svc_lock) = services.get(ch.service.as_str()) {
+                             let svc = svc_lock.lock().await;
+                             let status = if svc.is_connected() { "Connected" } else { "Disconnected" };
+                             status_lines.push(format!("- {}: {}", ch.service, status));
+                         } else {
+                             status_lines.push(format!("- {}: Service Not Found", ch.service));
+                         }
+                         checked_services.push(ch.service.clone());
+                    }
+                }
+                
+                let status_msg_content = status_lines.join("\n");
+                let status_msg = ServiceMessage {
+                    sender: "System".to_string(),
+                    sender_id: "system".to_string(),
+                    content: status_msg_content,
+                    attachments: vec![],
+                    source_service: "bridge".to_string(),
+                    source_channel: "system".to_string(),
+                };
+                
+                // Broadcast status to all channels in this bridge
+                for ch in channels {
+                    if let Some(svc_lock) = services.get(ch.service.as_str()) {
+                        let svc = svc_lock.lock().await;
+                        if let Err(e) = svc.send_message(&ch.channel, &status_msg).await {
+                             error!("Failed to send status to {}:{}: {}", ch.service, ch.channel, e);
+                        }
+                    }
+                }
+                
+                // Allow forwarding of the original .status message (User requested)
+                // continue; 
+            }
+
             // Apply alias if configured
             let display_name = if source_config.display_names {
                 source_config

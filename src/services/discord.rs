@@ -365,6 +365,10 @@ impl Service for DiscordService {
         self.config.bridge_own_messages
     }
 
+    fn is_connected(&self) -> bool {
+        self.client.is_some() && self.http.is_some()
+    }
+
     async fn disconnect(&mut self) -> Result<()> {
         info!("[Discord:{}] Disconnecting", self.name);
         // Serenity client cleanup handled by drop

@@ -267,6 +267,10 @@ impl Service for WhatsAppService {
         self.config.bridge_own_messages
     }
 
+    fn is_connected(&self) -> bool {
+        self.client.is_some()
+    }
+
     async fn disconnect(&mut self) -> Result<()> {
         info!("[WhatsApp:{}] Disconnecting", self.name);
         // WhatsApp client cleanup handled by drop

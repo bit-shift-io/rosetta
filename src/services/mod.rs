@@ -49,6 +49,11 @@ pub trait Service: Send + Sync {
     #[allow(dead_code)]
     fn service_name(&self) -> &str;
     
+    /// Check if the service is currently connected
+    fn is_connected(&self) -> bool {
+        true
+    }
+    
     /// Disconnect from the service
     #[allow(dead_code)]
     async fn disconnect(&mut self) -> Result<()>;

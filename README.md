@@ -64,6 +64,15 @@ Rosetta uses a `config.yaml` file for all settings.
 
     > **Tip**: See `config_example.yaml` for full options including Aliases.
 
+## Commands
+
+Rosetta supports built-in commands that can be sent in any bridged channel:
+
+*   **`.status`**
+    *   **Usage**: Type `.status` in a chat.
+    *   **Effect**: The bot checks the connection health of all services **in that specific bridge** and posts a report (e.g., "Bridge Status: Connected").
+    *   **Note**: The command itself is also forwarded to other bridged channels so everyone knows a status check was performed.
+
 ## Running
 
 1.  **Build and Run**:

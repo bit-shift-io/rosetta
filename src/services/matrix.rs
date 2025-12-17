@@ -250,10 +250,28 @@ impl Service for MatrixService {
 
 
             if send_text {
-                 let content = RoomMessageEventContent::text_plain(
-                    format!("{}: {}", message.sender, message.content)
-                );
-                room.send(content).await?;
+            if send_text {
+                 let body = format!("{}: {}", message.sender, message.content);
+                 
+                 // Convert markdown to HTML for Matrix
+                 let mut options = pulldown_cmark::Options::empty();
+                 options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+                 options.insert(pulldown_cmark::Options::ENABLE_TABLES);
+                 
+                 let parser = pulldown_cmark::Parser::new_ext(&body, options);
+                 let mut items = Vec::new();
+                 for event in parser {
+                    items.push(event);
+                 }
+                 // Re-create parser since the iterator was consumed (or just iterate directly if compiler allows, but html::push_html takes iterable)
+                 let parser = pulldown_cmark::Parser::new_ext(&body, options); // Re-create for push_html
+                 
+                 let mut html_body = String::new();
+                 pulldown_cmark::html::push_html(&mut html_body, parser);
+                 
+                 let content = RoomMessageEventContent::text_html(body, html_body);
+                 room.send(content).await?;
+            }
             }
 
             // 2. Send attachments
@@ -298,6 +316,10 @@ impl Service for MatrixService {
 
     fn should_bridge_own_messages(&self) -> bool {
         self.config.bridge_own_messages
+    }
+
+    fn is_connected(&self) -> bool {
+        self.client.is_some()
     }
 
     async fn disconnect(&mut self) -> Result<()> {
