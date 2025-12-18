@@ -1,0 +1,19 @@
+# --- Rust specific ---
+target/
+**/*.rs.bk
+Cargo.lock.pnpm
+
+# --- Data exclusion (per your request) ---
+data/*
+!data/.gitkeep
+
+# --- Git and metadata ---
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# --- OS / Misc ---
+.DS_Store
+*.log

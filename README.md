@@ -89,3 +89,8 @@ Rosetta supports built-in commands that can be sent in any bridged channel:
     *   `src/main.rs`: Entry point and service initialization.
     *   `src/bridge.rs`: Core bridging logic and message routing.
     *   `src/services/`: Protocol-specific implementations (Service trait).
+    
+## Docker / Podman
+Login: `podman login docker.io`
+Build: `podman build -t docker.io/gibbz/rosetta:latest .`
+Push: `podman push docker.io/gibbz/rosetta:latest`
