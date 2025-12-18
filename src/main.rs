@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 mod config;
 mod services;
 mod bridge;
+mod persistence;
 
 use config::{Config, ServiceConfig};
 use services::{Service, matrix::MatrixService, whatsapp::WhatsAppService, discord::DiscordService};
@@ -31,7 +32,7 @@ async fn main() -> Result<()> {
     builder.init();
 
     // Load configuration
-    let config = Config::load("config.yaml")?;
+    let config = Config::load("data/config.yaml")?;
     
     info!("Loaded configuration with {} services and {} bridges", 
         config.services.len(), config.bridges.len());
@@ -91,7 +92,7 @@ async fn main() -> Result<()> {
 
     // Create and start bridge coordinator
     let coordinator = BridgeCoordinator::new(config, services);
-    coordinator.start().await?;
+    coordinator?.start().await?;
 
     info!("All services started. Bridge is running...");
 

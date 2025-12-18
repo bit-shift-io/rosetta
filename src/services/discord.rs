@@ -16,12 +16,13 @@ use serenity::{
 };
 use reqwest::Url;
 
-use crate::services::{Service, ServiceMessage};
+use crate::services::{Service, ServiceMessage, ServiceEvent, ServiceUpdate};
 use crate::config::DiscordServiceConfig;
 
-/// Discord event handler
+use serenity::model::event::MessageUpdateEvent;
+
 struct DiscordHandler {
-    tx: mpsc::Sender<ServiceMessage>,
+    tx: mpsc::Sender<ServiceEvent>,
     service_name: String,
     debug: bool,
 }
@@ -46,7 +47,7 @@ impl EventHandler for DiscordHandler {
         // Handle attachments
         let mut attachments = Vec::new();
         for attachment in &msg.attachments {
-            if let Ok(response) = reqwest::get(&attachment.url).await {
+             if let Ok(response) = reqwest::get(&attachment.url).await {
                 if let Ok(bytes) = response.bytes().await {
                     attachments.push(crate::services::Attachment {
                         filename: attachment.filename.clone(),
@@ -54,17 +55,16 @@ impl EventHandler for DiscordHandler {
                         data: bytes.to_vec(),
                     });
                 } else {
-                    error!("[Discord] Failed to read attachment bytes for {}", attachment.filename);
+                     if self.debug { error!("[Discord] Failed to read attachment bytes for {}", attachment.filename); }
                 }
             } else {
-                error!("[Discord] Failed to download attachment from URL: {}", attachment.url);
+                 if self.debug { error!("[Discord] Failed to download attachment from URL: {}", attachment.url); }
             }
         }
         
-        // Handle Links (Scraping)
-        // Check for URLs in content that might be images/gifs (Tenor, etc.)
         let mut content = msg.content.clone();
         
+        // Link Scraping (Restored)
         // Simple regex for URLs
         if let Ok(url_regex) = regex::Regex::new(r"https?://[^\s]+") {
             let mut urls_to_process = Vec::new();
@@ -89,25 +89,16 @@ impl EventHandler for DiscordHandler {
             urls_to_process.sort();
             urls_to_process.dedup();
             
-            // Create a client with a browser-like User-Agent to avoid 403s (Tenor/Giphy often block default agents)
+            // Create a client with a browser-like User-Agent
             let client = reqwest::Client::builder()
                 .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
                 .unwrap_or_default();
 
             for url in urls_to_process {
-                if self.debug {
-                    info!("[Discord DEBUG] Scraping URL: {}", url);
-                }
-
                 // Check if it's media
                  match client.get(&url).send().await {
                      Ok(resp) => {
-                         let status = resp.status();
-                         if self.debug {
-                             info!("[Discord DEBUG] Scrape HTTP Status: {}", status);
-                         }
-
                          let mime = resp.headers().get("content-type")
                              .and_then(|v| v.to_str().ok())
                              .unwrap_or("")
@@ -133,64 +124,30 @@ impl EventHandler for DiscordHandler {
                                  }
                              }
                          } else if mime.starts_with("text/html") {
-                             // HTML page (potential OG:Image, e.g. Tenor)
+                             // HTML page - check for OG:Image (Simple heuristic)
                              if let Ok(text) = resp.text().await {
-                                 // Look for <meta property="og:image" content="...">
-                                 // Try multiple patterns to handle attribute ordering, quoting, and intervening attributes (like class="dynamic")
-                                 let patterns = [
-                                     r#"<meta\s+[^>]*?property=["']og:image["'][^>]*?content=["']([^"']+)["']"#,
-                                     r#"<meta\s+[^>]*?content=["']([^"']+)["'][^>]*?property=["']og:image["']"#,
-                                 ];
-                                 
-                                 let mut found_og_url = None;
-                                 
-                                 for pattern in &patterns {
-                                    if let Ok(re) = regex::Regex::new(pattern) {
-                                        if let Some(caps) = re.captures(&text) {
-                                            if let Some(match_url) = caps.get(1) {
-                                                found_og_url = Some(match_url.as_str().to_string());
-                                                break;
-                                            }
-                                        }
-                                    }
-                                 }
-
-                                 if let Some(target_url) = found_og_url {
-                                     let target_url = target_url.as_str();
-                                     if self.debug { info!("[Discord DEBUG] Found OG:Image: {}", target_url); }
-                                     
-                                     // Download the OG image using the same client
-                                     if let Ok(og_resp) = client.get(target_url).send().await {
-                                         let og_mime = og_resp.headers().get("content-type")
-                                             .and_then(|v| v.to_str().ok())
-                                             .unwrap_or("image/jpeg") // Assume image if OG:Image
-                                             .to_string();
-                                         
-                                         if let Ok(bytes) = og_resp.bytes().await {
-                                              media_data = Some(bytes.to_vec());
-                                              resolved_mime = og_mime;
-                                              filename = "embed.gif".to_string(); // Default to gif for tenor usually
-                                              
-                                              // Try to improve filename
-                                              if let Ok(u) = Url::parse(target_url) {
-                                                 if let Some(segments) = u.path_segments() {
-                                                     if let Some(last) = segments.last() {
-                                                         filename = last.to_string();
-                                                     }
-                                                 }
+                                 // Simple regex for og:image content
+                                 // property="og:image" content="..."
+                                 if let Ok(re) = regex::Regex::new(r#"property=["']og:image["'][^>]*?content=["']([^"']+)["']"#) {
+                                     if let Some(caps) = re.captures(&text) {
+                                         if let Some(match_url) = caps.get(1) {
+                                             let target_url = match_url.as_str();
+                                             // Download the OG image
+                                             if let Ok(og_resp) = client.get(target_url).send().await {
+                                                  if let Ok(bytes) = og_resp.bytes().await {
+                                                      media_data = Some(bytes.to_vec());
+                                                      resolved_mime = "image/gif".to_string(); // Assume gif/image
+                                                      filename = "embed.gif".to_string();
+                                                  }
                                              }
                                          }
-                                     }
-                                 } else {
-                                     if self.debug {
-                                         warn!("[Discord DEBUG] No OG:Image found in HTML. Snippet: {}", &text.chars().take(500).collect::<String>());
                                      }
                                  }
                              }
                          }
                          
                          if let Some(data) = media_data {
-                             if self.debug { info!("[Discord DEBUG] Scraped media from link: {} ({} bytes)", url, data.len()); }
+                             if self.debug { info!("[Discord DEBUG] Scraped media from link: {}", url); }
                              
                              attachments.push(crate::services::Attachment {
                                  filename,
@@ -198,12 +155,11 @@ impl EventHandler for DiscordHandler {
                                  data,
                              });
                              
-                             // Remove the URL from content if it was successfully scraped
-                             // causing the message to become effectively empty if it was just a link
+                             // Remove URL from content
                              content = content.replace(&url, "").trim().to_string();
                          }
                      },
-                     Err(e) => if self.debug { error!("[Discord DEBUG] Failed to fetch link {}: {}", url, e); }
+                     Err(_) => {}
                  }
             }
         }
@@ -211,16 +167,30 @@ impl EventHandler for DiscordHandler {
         let service_msg = ServiceMessage {
             sender: display_name,
             sender_id: msg.author.id.to_string(),
-            content, // Use the modified content (links removed)
+            content,
             attachments,
             source_service: self.service_name.clone(),
             source_channel: msg.channel_id.to_string(),
+            source_id: msg.id.to_string(),
         };
 
-
-
-        if let Err(e) = self.tx.send(service_msg).await {
+        if let Err(e) = self.tx.send(ServiceEvent::NewMessage(service_msg)).await {
             error!("[Discord] Failed to send message: {}", e);
+        }
+    }
+
+    async fn message_update(&self, _ctx: Context, _old_if_available: Option<Message>, new: Option<Message>, event: MessageUpdateEvent) {
+        if let Some(content) = event.content {
+             let update = ServiceUpdate {
+                 source_service: self.service_name.clone(),
+                 source_channel: event.channel_id.to_string(),
+                 source_id: event.id.to_string(),
+                 new_content: content,
+             };
+             
+             if let Err(e) = self.tx.send(ServiceEvent::UpdateMessage(update)).await {
+                 error!("[Discord] Failed to send update: {}", e);
+             }
         }
     }
 
@@ -258,7 +228,7 @@ impl Service for DiscordService {
         Ok(())
     }
 
-    async fn start(&mut self, tx: mpsc::Sender<ServiceMessage>) -> Result<()> {
+    async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
         let intents = GatewayIntents::GUILD_MESSAGES
             | GatewayIntents::DIRECT_MESSAGES
             | GatewayIntents::MESSAGE_CONTENT
@@ -293,39 +263,21 @@ impl Service for DiscordService {
         Ok(())
     }
 
-    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<()> {
+    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
         let http = self.http.as_ref()
             .ok_or_else(|| anyhow::anyhow!("Discord HTTP client not connected"))?;
 
-        // Helpful check for users who paste "GuildID/ChannelID" or URLs
         if channel.contains('/') {
-            return Err(anyhow::anyhow!(
-                "Invalid Discord Channel ID '{}'. Please use ONLY the specific Channel ID (the numeric part, e.g., '1207209226951335976'). Do not include the Server ID or URL.", 
-                channel
-            ));
+            return Err(anyhow::anyhow!("Invalid Channel ID"));
         }
 
-        let channel_id: u64 = channel.parse()
-            .map_err(|_| anyhow::anyhow!("Invalid Discord channel ID format: '{}'. Expected a numeric ID.", channel))?;
+        let channel_id: u64 = channel.parse()?;
         let channel_id = ChannelId::new(channel_id);
 
         let formatted_message = format!("{}: {}", message.sender, message.content);
+        let mut builder = serenity::builder::CreateMessage::new().content(&formatted_message);
 
-        if self.config.debug {
-             info!("[Discord DEBUG] Attempting to send to channel {}: '{}'", channel_id, formatted_message);
-        }
-
-        // Send message using the HTTP API with timeout
-        // No lock needed as we use the cached Http client
-        
-        // Wrap the Future in a timeout to detect hangs
-        // Create the message builder
-        let mut builder = serenity::builder::CreateMessage::new()
-            .content(&formatted_message);
-
-        // Add attachments if present
-        let mut files = Vec::new(); // Keep files in scope
-        
+        let mut files = Vec::new(); 
         for attachment in &message.attachments {
             let file = serenity::builder::CreateAttachment::bytes(
                 attachment.data.clone(), 
@@ -338,28 +290,25 @@ impl Service for DiscordService {
              builder = builder.files(files);
         }
 
-        // Send message using the HTTP API with timeout
-        // Wrap the Future in a timeout to detect hangs
-        let send_future = channel_id.send_message(http, builder);
-        match tokio::time::timeout(std::time::Duration::from_secs(30), send_future).await { // Increased timeout for uploads
-            Ok(result) => {
-                match result {
-                    Ok(_) => {
-                        // info!("[Discord DEBUG] Successfully sent to channel {}", channel);
-                        Ok(())
-                    },
-                    Err(e) => {
-                        error!("[Discord] Failed to send message to {}: {:?}", channel, e);
-                        // Log specific HTTP errors if possible
-                        Err(anyhow::anyhow!("Discord send error: {}", e))
-                    }
-                }
-            },
-            Err(_) => {
-                error!("[Discord] Send timed out for channel {}", channel);
-                Err(anyhow::anyhow!("Discord send timed out"))
-            }
+        match channel_id.send_message(http, builder).await {
+            Ok(msg) => Ok(msg.id.to_string()),
+            Err(e) => Err(anyhow::anyhow!("Discord send error: {}", e)),
         }
+    }
+
+    async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()> {
+         let http = self.http.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Discord HTTP client not connected"))?;
+            
+         let channel_id: u64 = channel.parse()?;
+         let channel_id = ChannelId::new(channel_id);
+         let msg_id: u64 = message_id.parse()?;
+         let msg_id = serenity::model::id::MessageId::new(msg_id);
+         
+         let builder = serenity::builder::EditMessage::new().content(new_content);
+         
+         channel_id.edit_message(http, msg_id, builder).await?;
+         Ok(())
     }
 
     fn service_name(&self) -> &str {

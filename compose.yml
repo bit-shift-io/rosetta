@@ -5,8 +5,7 @@ services:
     container_name: rosetta
     restart: unless-stopped
     volumes:
-      # Mount the configuration file
-      - ./config.yaml:/app/config.yaml
+      # Mount the data directory which contains config.yaml and persistent storage
       
       # Mount the data directory for persistent storage (WhatsApp sessions, etc.)
       # Ensure your config.yaml points persistence paths to "data/filename"

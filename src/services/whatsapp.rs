@@ -15,7 +15,7 @@ use waproto::whatsapp as wa;
 use wacore_binary::jid::Jid;
 use std::str::FromStr;
 
-use crate::services::{Service, ServiceMessage};
+use crate::services::{Service, ServiceMessage, ServiceEvent};
 use crate::config::WhatsAppServiceConfig;
 
 pub struct WhatsAppService {
@@ -65,7 +65,7 @@ impl Service for WhatsAppService {
         Ok(())
     }
 
-    async fn start(&mut self, tx: mpsc::Sender<ServiceMessage>) -> Result<()> {
+    async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
         let transport = TokioWebSocketTransportFactory::new();
         let http = UreqHttpClient::new();
         
@@ -100,6 +100,9 @@ impl Service for WhatsAppService {
                 async move {
                     match event {
                         WaEvent::Message(msg, info) => {
+                            if info.source.is_from_me {
+                                return;
+                            }
                             let sender_jid = info.source.sender.to_string();
                             let chat_jid = info.source.chat.to_string();
                             
@@ -146,9 +149,10 @@ impl Service for WhatsAppService {
                                         attachments,
                                         source_service: service_name.clone(),
                                         source_channel: chat_jid,
+                                        source_id: info.id.clone(),
                                     };
                                     
-                                    if let Err(e) = tx.send(msg).await {
+                                    if let Err(e) = tx.send(ServiceEvent::NewMessage(msg)).await {
                                         error!("Failed to send internal message: {}", e);
                                     }
                                 }
@@ -178,12 +182,13 @@ impl Service for WhatsAppService {
             Ok(())
         }
     
-        async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<()> {
+        async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
             let client = self.client.as_ref()
                 .ok_or_else(|| anyhow::anyhow!("WhatsApp client not connected"))?;
             
             let jid = Jid::from_str(channel)?;
-            
+            let mut last_id = "unknown".to_string();
+
             // 1. Send text if present
             // 1. Send text if present AND no attachments (otherwise text goes in caption)
             if !message.content.is_empty() && message.attachments.is_empty() {
@@ -194,7 +199,8 @@ impl Service for WhatsAppService {
                     })),
                     ..Default::default()
                 };
-                client.send_message(jid.clone(), wa_message).await?;
+                let resp = client.send_message(jid.clone(), wa_message).await?;
+                last_id = resp; 
             }
             
             // 2. Send attachments
@@ -249,15 +255,22 @@ impl Service for WhatsAppService {
                     }
                 };
                 
-                client.send_message(jid.clone(), wa_message).await?;
+                let resp = client.send_message(jid.clone(), wa_message).await?;
+                last_id = resp;
             }
             
             if self.config.debug {
                 info!("[WhatsApp DEBUG] Successfully sent message(s) to {}", channel);
             }
             
-            Ok(())
+            Ok(last_id)
         }
+
+    async fn edit_message(&self, _channel: &str, _message_id: &str, _new_content: &str) -> Result<()> {
+        // WhatsApp editing not fully supported in this bridge version yet
+        // Returning Ok to satisfy trait
+        Ok(())
+    }
 
     fn service_name(&self) -> &str {
         &self.name

@@ -25,6 +25,30 @@ pub struct ServiceMessage {
     pub source_service: String,
     /// Source channel identifier
     pub source_channel: String,
+    /// Source message identifier (for editing/replying)
+    pub source_id: String,
+}
+
+// Re-export service implementations
+pub mod matrix;
+pub mod whatsapp;
+pub mod discord;
+
+/// Represents an update to an existing message (edit)
+#[derive(Debug, Clone)]
+pub struct ServiceUpdate {
+    pub source_service: String,
+    pub source_channel: String,
+    pub source_id: String,
+    pub new_content: String,
+}
+
+/// Enum covering all events a service can emit
+#[derive(Debug, Clone)]
+pub enum ServiceEvent {
+    NewMessage(ServiceMessage),
+    UpdateMessage(ServiceUpdate),
+    // Potential future events: DeleteMessage, UserJoin, etc.
 }
 
 /// Trait that all chat service implementations must implement
@@ -34,11 +58,15 @@ pub trait Service: Send + Sync {
     async fn connect(&mut self) -> Result<()>;
     
     /// Start listening for incoming messages
-    /// Returns a receiver channel for messages from this service
-    async fn start(&mut self, tx: mpsc::Sender<ServiceMessage>) -> Result<()>;
+    /// Returns a receiver channel for events from this service
+    async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()>;
     
     /// Send a message to a specific channel on this service
-    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<()>;
+    /// Returns the ID of the sent message (for tracking)
+    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String>;
+
+    /// Edit an existing message
+    async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()>;
     
     /// Whether this service should bridge its own messages
     fn should_bridge_own_messages(&self) -> bool {
@@ -64,8 +92,3 @@ pub trait Service: Send + Sync {
     #[allow(dead_code)]
     async fn disconnect(&mut self) -> Result<()>;
 }
-
-// Re-export service implementations
-pub mod matrix;
-pub mod whatsapp;
-pub mod discord;

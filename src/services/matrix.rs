@@ -14,7 +14,10 @@ use matrix_sdk::{
     },
     Room,
 };
-use crate::services::{Service, ServiceMessage};
+use crate::services::{Service, ServiceMessage, ServiceEvent};
+
+// ... (skipping to line 312 context in tool application, but I'll do two chunks or just careful single file rewrite if needed. MultiReplace is better here)
+
 use crate::config::MatrixServiceConfig;
 
 pub struct MatrixService {
@@ -71,7 +74,7 @@ impl Service for MatrixService {
         Ok(())
     }
 
-    async fn start(&mut self, tx: mpsc::Sender<ServiceMessage>) -> Result<()> {
+    async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
         let client = self.client.as_ref()
             .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?
             .clone();
@@ -127,6 +130,26 @@ impl Service for MatrixService {
                         info!("[Matrix DEBUG] Ignoring old message (ts: {:?})", event.origin_server_ts);
                     }
                     return;
+                }
+
+                // Handle Edits (m.replace)
+                if let Some(matrix_sdk::ruma::events::room::message::Relation::Replacement(replacement)) = &event.content.relates_to {
+                    let new_body = match &replacement.new_content.msgtype {
+                         MessageType::Text(t) => t.body.clone(),
+                         _ => "Unsupported edit content".to_string(),
+                    };
+                    
+                    let update = crate::services::ServiceUpdate {
+                         source_service: service_name.clone(),
+                         source_channel: room.room_id().to_string(),
+                         source_id: replacement.event_id.to_string(), // The original event ID
+                         new_content: new_body,
+                     };
+                     
+                     if let Err(e) = tx.send(ServiceEvent::UpdateMessage(update)).await {
+                          error!("[Matrix] Failed to send update: {}", e);
+                     }
+                     return;
                 }
 
                 // Handle different message types (Text and Image)
@@ -206,9 +229,10 @@ impl Service for MatrixService {
                     attachments,   // Use attachments resolved above
                     source_service: service_name.clone(),
                     source_channel: room.room_id().to_string(),
+                    source_id: event.event_id.to_string(),
                 };
                 
-                match tx.send(msg).await {
+                match tx.send(ServiceEvent::NewMessage(msg)).await {
                     Ok(_) => {}, // Success
                     Err(e) => error!("[Matrix] Failed to send msg to Bridge: {}", e),
                 }
@@ -235,7 +259,7 @@ impl Service for MatrixService {
         Ok(())
     }
 
-    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<()> {
+    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
         let client = self.client.as_ref()
             .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
         
@@ -246,10 +270,8 @@ impl Service for MatrixService {
             
             // 1. Send text content (ONLY if there are no attachments, otherwise text goes in caption)
             let send_text = !message.content.is_empty() && message.attachments.is_empty();
-            
+            let mut last_event_id = String::new();
 
-
-            if send_text {
             if send_text {
                  let body = format!("{}: {}", message.sender, message.content);
                  
@@ -259,19 +281,12 @@ impl Service for MatrixService {
                  options.insert(pulldown_cmark::Options::ENABLE_TABLES);
                  
                  let parser = pulldown_cmark::Parser::new_ext(&body, options);
-                 let mut items = Vec::new();
-                 for event in parser {
-                    items.push(event);
-                 }
-                 // Re-create parser since the iterator was consumed (or just iterate directly if compiler allows, but html::push_html takes iterable)
-                 let parser = pulldown_cmark::Parser::new_ext(&body, options); // Re-create for push_html
-                 
                  let mut html_body = String::new();
                  pulldown_cmark::html::push_html(&mut html_body, parser);
                  
                  let content = RoomMessageEventContent::text_html(body, html_body);
-                 room.send(content).await?;
-            }
+                 let resp = room.send(content).await?;
+                 last_event_id = resp.event_id.to_string();
             }
 
             // 2. Send attachments
@@ -289,25 +304,42 @@ impl Service for MatrixService {
                 let caption_content = TextMessageEventContent::plain(caption);
                 let config = matrix_sdk::attachment::AttachmentConfig::new().caption(Some(caption_content));
                 
-                if let Err(e) = room.send_attachment(
+                match room.send_attachment(
                     &attachment.filename,
                     &mime,
                     attachment.data.clone(), // Clone data as required by send_attachment
                     config,
                 ).await {
-                    error!("[Matrix] Failed to send attachment {}: {}", attachment.filename, e);
+                     Ok(resp) => last_event_id = resp.event_id.to_string(),
+                     Err(e) => error!("[Matrix] Failed to send attachment {}: {}", attachment.filename, e),
                 }
             }
             
-            if self.config.debug {
-                info!("[Matrix] Successfully sent message to {}", channel);
-            }
-            
-            Ok(())
+            Ok(last_event_id)
         } else {
             warn!("Matrix room '{}' not found! Ensure the bot is joined and synced.", channel);
             Err(anyhow::anyhow!("Room not found: {}", channel))
         }
+    }
+
+    async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()> {
+        let client = self.client.as_ref()
+             .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
+        let room_id = <&RoomId>::try_from(channel)?;
+        
+        let event_id = OwnedEventId::try_from(message_id)
+            .map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
+
+        if let Some(room) = client.get_room(room_id) {
+             let content = RoomMessageEventContent::text_plain(new_content)
+                .make_replacement(matrix_sdk::ruma::events::room::message::ReplacementMetadata::new(event_id, None));
+                
+             room.send(content).await?;
+             Ok(())
+        } else {
+             Err(anyhow::anyhow!("Room not found"))
+        }
+
     }
 
     fn service_name(&self) -> &str {

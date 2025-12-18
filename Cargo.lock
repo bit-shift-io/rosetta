@@ -3544,6 +3544,7 @@ dependencies = [
  "qr2term",
  "regex",
  "reqwest 0.11.27",
+ "rusqlite",
  "serde",
  "serde_yaml",
  "serenity",
