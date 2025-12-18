@@ -207,7 +207,7 @@ impl Service for MatrixService {
                              Err(e) => error!("[Matrix] Failed to download media: {}", e),
                          }
                          
-                        (image_content.body.clone(), attachments)
+                        ("".to_string(), attachments)
                     },
                      // Add other types later (Video, etc.)
                     _ => {
@@ -306,16 +306,13 @@ impl Service for MatrixService {
             // 1. Send text content (if not empty or no attachments - ensuring at least something is sent)
             
             // 1. Send text content (ONLY if there are no attachments, otherwise text goes in caption)
-            let send_text = !message.content.is_empty() && message.attachments.is_empty();
             let mut last_event_id = String::new();
-
-            if send_text {
-                 let body = format!("{}: {}", message.sender, message.content);
+            if !message.content.is_empty() && message.attachments.is_empty() {
+                 let body = format!("**{}**: {}", message.sender, message.content);
                  
                  // Convert markdown to HTML for Matrix
                  let mut options = pulldown_cmark::Options::empty();
                  options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
-                 options.insert(pulldown_cmark::Options::ENABLE_TABLES);
                  
                  let parser = pulldown_cmark::Parser::new_ext(&body, options);
                  let mut html_body = String::new();
@@ -328,23 +325,22 @@ impl Service for MatrixService {
 
             // 2. Send attachments
             for attachment in &message.attachments {
-                // Determine mime type enum
                 let mime = mime::Mime::from_str(&attachment.mime_type).unwrap_or(mime::APPLICATION_OCTET_STREAM);
                 
-                // room.send_attachment handles upload and event creation
-                // We construct the attachment config
+                // Construct plain caption without formatting
                 let caption = if message.content.is_empty() {
                     format!("Sent by {}", message.sender)
                 } else {
                     format!("{}: {}", message.sender, message.content)
                 };
+
                 let caption_content = TextMessageEventContent::plain(caption);
                 let config = matrix_sdk::attachment::AttachmentConfig::new().caption(Some(caption_content));
                 
                 match room.send_attachment(
                     &attachment.filename,
                     &mime,
-                    attachment.data.clone(), // Clone data as required by send_attachment
+                    attachment.data.clone(),
                     config,
                 ).await {
                      Ok(resp) => last_event_id = resp.event_id.to_string(),

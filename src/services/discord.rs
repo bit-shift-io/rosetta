@@ -302,7 +302,11 @@ impl Service for DiscordService {
         let channel_id: u64 = channel.parse()?;
         let channel_id = ChannelId::new(channel_id);
 
-        let formatted_message = format!("{}: {}", message.sender, message.content);
+        let formatted_message = if message.content.is_empty() {
+            format!("**{}**", message.sender)
+        } else {
+            format!("**{}**: {}", message.sender, message.content)
+        };
         let mut builder = serenity::builder::CreateMessage::new().content(&formatted_message);
 
         let mut files = Vec::new(); 

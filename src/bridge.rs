@@ -161,7 +161,7 @@ impl BridgeCoordinator {
                                     status_lines.push("* *(No members found or not supported)*".to_string());
                                 } else {
                                     for member in members {
-                                        status_lines.push(format!("* {}", member));
+                                        status_lines.push(format!("* **{}**", member));
                                     }
                                 }
                             },

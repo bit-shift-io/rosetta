@@ -223,7 +223,7 @@ impl Service for WhatsAppService {
             if !message.content.is_empty() && message.attachments.is_empty() {
                 let wa_message = wa::Message {
                     extended_text_message: Some(Box::new(wa::message::ExtendedTextMessage {
-                        text: Some(format!("{}: {}", message.sender, message.content)),
+                        text: Some(format!("*{}*: {}", message.sender, message.content)),
                         ..Default::default()
                     })),
                     ..Default::default()
@@ -258,9 +258,9 @@ impl Service for WhatsAppService {
                             file_sha256: Some(upload.file_sha256),
                             file_length: Some(attachment.data.len() as u64),
                             caption: Some(if message.content.is_empty() {
-                                format!("Sent by {}", message.sender)
+                                format!("*{}*", message.sender)
                             } else {
-                                format!("{}: {}", message.sender, message.content)
+                                format!("*{}*: {}", message.sender, message.content)
                             }),
                             ..Default::default()
                         })),
