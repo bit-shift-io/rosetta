@@ -12,6 +12,7 @@ use whatsapp_rust::proto_helpers::MessageExt;
 use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
 use whatsapp_rust_ureq_http_client::UreqHttpClient;
 use waproto::whatsapp as wa;
+use waproto::whatsapp::MessageKey;
 use wacore_binary::jid::Jid;
 use std::str::FromStr;
 
@@ -137,6 +138,34 @@ impl Service for WhatsAppService {
                                             });
                                         },
                                         Err(e) => error!("[WhatsApp] Failed to download media: {}", e),
+                                    }
+                                }
+                                
+                                // Handle Reactions
+                                if let Some(reaction) = &msg.reaction_message {
+                                    if let Some(key) = &reaction.key {
+                                        if key.from_me == Some(true) {
+                                            return; 
+                                        }
+                                        if debug {
+                                            info!("[WhatsApp:{}] Received reaction message: {:?}", service_name, reaction);
+                                        }
+                                        if let Some(target_id) = &key.id {
+                                             let reaction_event = crate::services::ServiceReaction {
+                                                 source_service: service_name.clone(),
+                                                 source_channel: chat_jid.clone(),
+                                                 source_message_id: target_id.clone(),
+                                                 sender: display_name.clone(),
+                                                 emoji: reaction.text.clone().unwrap_or_default(),
+                                             };
+                                             
+                                             if let Err(e) = tx.send(ServiceEvent::NewReaction(reaction_event)).await {
+                                                 error!("Failed to send reaction: {}", e);
+                                             }
+                                             // Return early if it's just a reaction? 
+                                             // WhatsApp messages usually contain one thing.
+                                             return; 
+                                        }
                                     }
                                 }
 
@@ -268,8 +297,32 @@ impl Service for WhatsAppService {
 
     async fn edit_message(&self, _channel: &str, _message_id: &str, _new_content: &str) -> Result<()> {
         // WhatsApp editing not fully supported in this bridge version yet
-        // Returning Ok to satisfy trait
         Ok(())
+    }
+
+    async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
+         let client = self.client.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("WhatsApp client not connected"))?;
+            
+         let jid = Jid::from_str(channel)?;
+         
+         let wa_message = wa::Message {
+             reaction_message: Some(wa::message::ReactionMessage {
+                 key: Some(MessageKey {
+                     remote_jid: Some(channel.to_string()),
+                     from_me: Some(true), 
+                     id: Some(message_id.to_string()),
+                     ..Default::default()
+                 }),
+                 text: Some(emoji.to_string()),
+                 sender_timestamp_ms: Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as i64),
+                 ..Default::default()
+             }),
+             ..Default::default()
+         };
+         
+         client.send_message(jid, wa_message).await?;
+         Ok(())
     }
 
     fn service_name(&self) -> &str {

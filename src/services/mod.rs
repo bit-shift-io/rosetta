@@ -43,11 +43,22 @@ pub struct ServiceUpdate {
     pub new_content: String,
 }
 
+/// Represents a reaction to a message
+#[derive(Debug, Clone)]
+pub struct ServiceReaction {
+    pub source_service: String,
+    pub source_channel: String,
+    pub source_message_id: String,
+    pub sender: String,
+    pub emoji: String,
+}
+
 /// Enum covering all events a service can emit
 #[derive(Debug, Clone)]
 pub enum ServiceEvent {
     NewMessage(ServiceMessage),
     UpdateMessage(ServiceUpdate),
+    NewReaction(ServiceReaction),
     // Potential future events: DeleteMessage, UserJoin, etc.
 }
 
@@ -67,6 +78,9 @@ pub trait Service: Send + Sync {
 
     /// Edit an existing message
     async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()>;
+
+    /// React to a message
+    async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()>;
     
     /// Whether this service should bridge its own messages
     fn should_bridge_own_messages(&self) -> bool {

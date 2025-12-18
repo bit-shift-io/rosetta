@@ -10,6 +10,7 @@ use matrix_sdk::{
     config::SyncSettings,
     ruma::{
         events::room::message::{OriginalSyncRoomMessageEvent, RoomMessageEventContent, MessageType, TextMessageEventContent},
+        events::reaction::OriginalSyncReactionEvent,
         RoomId, OwnedEventId,
     },
     Room,
@@ -90,13 +91,16 @@ impl Service for MatrixService {
         ));
         
         let my_user_id = client.user_id().unwrap().to_owned();
+        let my_user_id_msgs = my_user_id.clone();
         let recent_ids_handler = recent_event_ids.clone();
         let safe_client = client.clone(); // Clone for the handler
         
+        let tx_msgs = tx.clone();
+        let service_name_msgs = service_name.clone();
         client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
-            let tx = tx.clone();
-            let service_name = service_name.clone();
-            let my_user_id = my_user_id.clone();
+            let tx = tx_msgs.clone();
+            let service_name = service_name_msgs.clone();
+            let my_user_id = my_user_id_msgs.clone();
             let recent_ids = recent_ids_handler.clone();
             let safe_client = safe_client.clone();
             
@@ -239,6 +243,39 @@ impl Service for MatrixService {
             }
         });
 
+
+
+        // Add handler for Reactions
+        let tx_reaction = tx.clone();
+        let service_name_reaction = service_name.clone();
+        let debug_reaction = debug;
+        let my_user_id_reaction = my_user_id.clone();
+        client.add_event_handler(move |event: OriginalSyncReactionEvent, room: Room| {
+            let tx = tx_reaction.clone();
+            let service_name = service_name_reaction.clone();
+            let debug = debug_reaction;
+            let my_user_id = my_user_id_reaction.clone();
+            async move {
+                if event.sender == my_user_id {
+                    return;
+                }
+                if debug {
+                    info!("[Matrix:{}] Received reaction from {}: {}", service_name, event.sender, event.content.relates_to.key);
+                }
+                let update = crate::services::ServiceReaction {
+                     source_service: service_name.clone(),
+                     source_channel: room.room_id().to_string(),
+                     source_message_id: event.content.relates_to.event_id.to_string(),
+                     sender: event.sender.to_string(), 
+                     emoji: event.content.relates_to.key.clone(),
+                 };
+                 
+                 if let Err(e) = tx.send(ServiceEvent::NewReaction(update)).await {
+                      error!("[Matrix] Failed to send reaction: {}", e);
+                 }
+            }
+        });
+
         // Start sync in background
         let sync_client = client.clone();
         tokio::spawn(async move {
@@ -340,6 +377,24 @@ impl Service for MatrixService {
              Err(anyhow::anyhow!("Room not found"))
         }
 
+    }
+
+    async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
+        let client = self.client.as_ref()
+             .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
+        let room_id = <&RoomId>::try_from(channel)?;
+        let event_id = OwnedEventId::try_from(message_id)
+            .map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
+
+        if let Some(room) = client.get_room(room_id) {
+             let reaction = matrix_sdk::ruma::events::reaction::ReactionEventContent::new(
+                 matrix_sdk::ruma::events::relation::Annotation::new(event_id, emoji.to_string())
+             );
+             room.send(reaction).await?;
+             Ok(())
+        } else {
+             Err(anyhow::anyhow!("Room not found"))
+        }
     }
 
     fn service_name(&self) -> &str {

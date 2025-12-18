@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use anyhow::Result;
-use log::{info, error, warn};
+use log::{info, error};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
@@ -179,7 +179,7 @@ impl EventHandler for DiscordHandler {
         }
     }
 
-    async fn message_update(&self, _ctx: Context, _old_if_available: Option<Message>, new: Option<Message>, event: MessageUpdateEvent) {
+    async fn message_update(&self, _ctx: Context, _old_if_available: Option<Message>, _new: Option<Message>, event: MessageUpdateEvent) {
         if let Some(content) = event.content {
              let update = ServiceUpdate {
                  source_service: self.service_name.clone(),
@@ -191,6 +191,32 @@ impl EventHandler for DiscordHandler {
              if let Err(e) = self.tx.send(ServiceEvent::UpdateMessage(update)).await {
                  error!("[Discord] Failed to send update: {}", e);
              }
+        }
+    }
+
+    async fn reaction_add(&self, _ctx: Context, add_reaction: serenity::model::channel::Reaction) {
+        // Ignore own reactions
+        if let Some(user_id) = add_reaction.user_id {
+            if user_id == _ctx.cache.current_user().id {
+                 return;
+            }
+        }
+
+        info!("[Discord:{}] Received reaction '{}' in channel {} on message {}", 
+            self.service_name, add_reaction.emoji, add_reaction.channel_id, add_reaction.message_id);
+            
+        let emoji = add_reaction.emoji.to_string();
+        
+        let reaction_event = crate::services::ServiceReaction {
+             source_service: self.service_name.clone(),
+             source_channel: add_reaction.channel_id.to_string(),
+             source_message_id: add_reaction.message_id.to_string(),
+             sender: add_reaction.user_id.map(|u| u.to_string()).unwrap_or("unknown".to_string()),
+             emoji,
+        };
+        
+        if let Err(e) = self.tx.send(ServiceEvent::NewReaction(reaction_event)).await {
+             error!("[Discord] Failed to send reaction event: {}", e);
         }
     }
 
@@ -233,6 +259,8 @@ impl Service for DiscordService {
             | GatewayIntents::DIRECT_MESSAGES
             | GatewayIntents::MESSAGE_CONTENT
             | GatewayIntents::GUILD_MEMBERS
+            | GatewayIntents::GUILD_MESSAGE_REACTIONS
+            | GatewayIntents::DIRECT_MESSAGE_REACTIONS
             | GatewayIntents::GUILDS; // Needed for caching channels/guilds
 
         let handler = DiscordHandler {
@@ -308,6 +336,25 @@ impl Service for DiscordService {
          let builder = serenity::builder::EditMessage::new().content(new_content);
          
          channel_id.edit_message(http, msg_id, builder).await?;
+         Ok(())
+    }
+
+    async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
+         let http = self.http.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Discord HTTP client not connected"))?;
+            
+         let channel_id: u64 = channel.parse()?;
+         let channel_id = ChannelId::new(channel_id);
+         let msg_id: u64 = message_id.parse()?;
+         let msg_id = serenity::model::id::MessageId::new(msg_id);
+         
+         // Parse emoji: 
+         // For simple Unicode, we just pass the char.
+         // Serenity expects ReactionType.
+         let reaction_type = serenity::model::channel::ReactionType::try_from(emoji)
+             .map_err(|_| anyhow::anyhow!("Invalid emoji"))?;
+             
+         channel_id.create_reaction(http, msg_id, reaction_type).await?;
          Ok(())
     }
 

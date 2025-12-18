@@ -25,7 +25,8 @@ impl BridgeCoordinator {
     }
 
     /// Start all bridges and begin routing messages
-    pub async fn start(self) -> Result<()> {
+    pub async fn start(&self) -> Result<()> {
+        info!("Starting Bridge Coordinator...");
         let (tx, mut rx) = mpsc::channel::<ServiceEvent>(100);
 
         // Start all services
@@ -41,21 +42,24 @@ impl BridgeCoordinator {
         let config = self.config.clone();
         let store = self.store.clone();
 
-        // Message routing task
-        tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                 match event {
-                     ServiceEvent::NewMessage(msg) => {
-                         Self::route_message(msg, &services, &config, &store).await;
-                     },
-                     ServiceEvent::UpdateMessage(update) => {
-                         Self::handle_edit(update, &services, &config, &store).await;
-                     }
+        // Message routing loop - blocks until cancelled or rx closed
+        while let Some(event) = rx.recv().await {
+             match event {
+                 ServiceEvent::NewMessage(msg) => {
+                     Self::route_message(msg, &services, &config, &store).await;
+                 },
+                 ServiceEvent::UpdateMessage(update) => {
+                     Self::handle_edit(update, &services, &config, &store).await;
+                 },
+                 ServiceEvent::NewReaction(reaction) => {
+                     Self::handle_reaction(reaction, &services, &config, &store).await;
                  }
-            }
-        });
-
+             }
+        }
+        
         Ok(())
+
+
     }
 
     /// Route a message from one service to all other services in the same bridge
@@ -280,34 +284,17 @@ impl BridgeCoordinator {
     ) {
          info!("Processing edit from {}:{}:{}", update.source_service, update.source_channel, update.source_id);
          
-         // Find all destination messages for this source
-         match store.get_mappings(&update.source_service, &update.source_channel, &update.source_id) {
+         // Find all related messages for this source/dest
+         match store.get_associated_mappings(&update.source_service, &update.source_channel, &update.source_id) {
              Ok(mappings) => {
                  for (dest_service, dest_channel, dest_id) in mappings {
                      if let Some(service_lock) = services.get(&dest_service) {
                          let service = service_lock.lock().await;
                          
-                         // We might want to apply the same alias logic here, 
-                         // but for simplicity we just forward content for now.
-                         // Ideally we should cache the original sender name to re-prepend it.
-                         // For now, let's just forward the raw content or try to apply the format if we knew the sender.
-                         // Since we don't have the original sender in the Update struct, we might send just the content.
-                         // However, Matrix/Discord bridges usually expect "User: Content".
-                         // IMPROVEMENT: Retrieve original message from DB? Or just edit blindly.
-                         // For now, we will blindly edit. This means if the original message was "User: Hello", 
-                         // and we edit to "World", it becomes "World". The "User:" prefix is lost on edit unless we re-fetch it.
-                         // But `ServiceUpdate` assumes we are just passing the new content.
-                         // Let's assume the update.new_content is the raw new text.
-                         // We can't easily re-apply the "User: " prefix without looking it up.
-                         
-                         // HACK/FIX: Bridges usually manage this better. 
-                         // For this iteration, we will just send the content.
-                         // The user will see the message change. 
-                         
                          if let Err(e) = service.edit_message(&dest_channel, &dest_id, &update.new_content).await {
-                              error!("Failed to edit message in {}:{}: {}", dest_service, dest_channel, e);
+                               error!("Failed to edit message in {}:{}: {}", dest_service, dest_channel, e);
                          } else {
-                              info!("Edited message in {}:{}", dest_service, dest_channel);
+                               info!("Edited message in {}:{}", dest_service, dest_channel);
                          }
                      }
                  }
@@ -316,5 +303,44 @@ impl BridgeCoordinator {
                  error!("Failed to look up message mappings: {}", e);
              }
          }
+    }
+
+    async fn handle_reaction(
+        reaction: crate::services::ServiceReaction,
+        services: &HashMap<String, Arc<tokio::sync::Mutex<Box<dyn Service>>>>,
+        _config: &Config,
+        store: &MessageStore,
+    ) {
+        info!("Processing reaction '{}' from {} in {}:{}:{}", reaction.emoji, reaction.sender, reaction.source_service, reaction.source_channel, reaction.source_message_id);
+
+        // Find all related messages for this source/dest
+        match store.get_associated_mappings(&reaction.source_service, &reaction.source_channel, &reaction.source_message_id) {
+            Ok(mappings) => {
+                for (dest_service, dest_channel, dest_id) in mappings {
+                    info!("Forwarding reaction to {}:{}:{}", dest_service, dest_channel, dest_id);
+                    if let Some(service_lock) = services.get(&dest_service) {
+                        let service = service_lock.lock().await;
+                        
+                        // We forward the reaction blindly to the destination message
+                        if let Err(e) = service.react_to_message(&dest_channel, &dest_id, &reaction.emoji).await {
+                             // Log as warn, reactions often fail due to constraints (deleted msg, etc)
+                             warn!("Failed to react in {}:{}: {}", dest_service, dest_channel, e);
+                        } else {
+                             info!("Reacted in {}:{}", dest_service, dest_channel);
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                 warn!("Reaction ignored (message lookup failed): {}", e);
+            }
+        }
+    }
+
+    /// Graceful shutdown: broadcast exit message
+    /// Graceful shutdown: broadcast exit message
+    pub async fn shutdown(&self) {
+        info!("Shutting down bridge...");
+        // User requested to disable "Goodbye" message
     }
 }

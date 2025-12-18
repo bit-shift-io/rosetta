@@ -91,14 +91,22 @@ async fn main() -> Result<()> {
     }
 
     // Create and start bridge coordinator
-    let coordinator = BridgeCoordinator::new(config, services);
-    coordinator?.start().await?;
-
+    let coordinator = BridgeCoordinator::new(config, services)?;
     info!("All services started. Bridge is running...");
 
-    // Wait for Ctrl-C
-    tokio::signal::ctrl_c().await?;
-    info!("Ctrl-C received, shutting down...");
+    // Run coordinator and wait for Ctrl-C
+    tokio::select! {
+        res = coordinator.start() => {
+            if let Err(e) = res {
+                error!("Bridge coordinator crashed: {}", e);
+                return Err(e);
+            }
+        },
+        _ = tokio::signal::ctrl_c() => {
+             info!("Ctrl-C received, shutting down...");
+             coordinator.shutdown().await;
+        }
+    }
 
     Ok(())
 }
