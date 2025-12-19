@@ -94,4 +94,5 @@ Rosetta supports built-in commands that can be sent in any bridged channel:
 
 Login: `podman login docker.io`  
 Build: `podman build -t docker.io/gibbz/rosetta:latest .`  
+Inspect: `podman run --rm -it rosetta:latest sh`
 Push: `podman push docker.io/gibbz/rosetta:latest`
