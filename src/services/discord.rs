@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use anyhow::Result;
-use log::{info, error};
+use log::{info, error, warn};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
@@ -30,8 +30,12 @@ struct DiscordHandler {
 #[serenity_async_trait]
 impl EventHandler for DiscordHandler {
     async fn message(&self, ctx: Context, msg: Message) {
-        // Ignore bot messages
-        if msg.author.bot {
+        let is_own = msg.author.id == ctx.cache.current_user().id;
+        
+        if is_own {
+            // bridge coordinator will filter if needed
+        } else if msg.author.bot {
+            // Ignore other bots
             return;
         }
 
@@ -172,6 +176,7 @@ impl EventHandler for DiscordHandler {
             source_service: self.service_name.clone(),
             source_channel: msg.channel_id.to_string(),
             source_id: msg.id.to_string(),
+            is_own,
         };
 
         if let Err(e) = self.tx.send(ServiceEvent::NewMessage(service_msg)).await {
@@ -195,13 +200,16 @@ impl EventHandler for DiscordHandler {
     }
 
     async fn reaction_add(&self, _ctx: Context, add_reaction: serenity::model::channel::Reaction) {
-        // Ignore own reactions
-        if let Some(user_id) = add_reaction.user_id {
-            if user_id == _ctx.cache.current_user().id {
-                 return;
-            }
-        }
+        let is_own = if let Some(user_id) = add_reaction.user_id {
+            user_id == _ctx.cache.current_user().id
+        } else {
+            false
+        };
 
+        if is_own {
+            // bridge coordinator will filter if needed
+        }
+        
         info!("[Discord:{}] Received reaction '{}' in channel {} on message {}", 
             self.service_name, add_reaction.emoji, add_reaction.channel_id, add_reaction.message_id);
             
@@ -211,8 +219,9 @@ impl EventHandler for DiscordHandler {
              source_service: self.service_name.clone(),
              source_channel: add_reaction.channel_id.to_string(),
              source_message_id: add_reaction.message_id.to_string(),
-             sender: add_reaction.user_id.map(|u| u.to_string()).unwrap_or("unknown".to_string()),
+             _sender: add_reaction.user_id.map(|u| u.to_string()).unwrap_or("unknown".to_string()),
              emoji,
+             is_own,
         };
         
         if let Err(e) = self.tx.send(ServiceEvent::NewReaction(reaction_event)).await {
@@ -302,10 +311,11 @@ impl Service for DiscordService {
         let channel_id: u64 = channel.parse()?;
         let channel_id = ChannelId::new(channel_id);
 
-        let formatted_message = if message.content.is_empty() {
-            format!("**{}**", message.sender)
-        } else {
-            format!("**{}**: {}", message.sender, message.content)
+        let formatted_message = match (message.sender.is_empty(), message.content.is_empty()) {
+            (true, true) => "".to_string(),
+            (true, false) => message.content.clone(),
+            (false, true) => format!("**{}**", message.sender),
+            (false, false) => format!("**{}**: {}", message.sender, message.content),
         };
         let mut builder = serenity::builder::CreateMessage::new().content(&formatted_message);
 
@@ -364,10 +374,6 @@ impl Service for DiscordService {
 
     fn service_name(&self) -> &str {
         &self.name
-    }
-
-    fn should_bridge_own_messages(&self) -> bool {
-        self.config.bridge_own_messages
     }
 
     fn is_connected(&self) -> bool {
@@ -459,6 +465,25 @@ impl Service for DiscordService {
     async fn disconnect(&mut self) -> Result<()> {
         info!("[Discord:{}] Disconnecting", self.name);
         // Serenity client cleanup handled by drop
+        Ok(())
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        info!("[Discord:{}] Waiting for gateway connection...", self.name);
+        
+        let cache = self.cache.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Discord Cache not initialized"))?;
+        
+        // Wait up to 30 seconds for guilds to be cached (indicates ready)
+        for _ in 0..30 {
+            if cache.guild_count() > 0 {
+                info!("[Discord:{}] Gateway connected and cache populated!", self.name);
+                return Ok(());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+        
+        warn!("[Discord:{}] Wait until ready timed out, but proceeding anyway.", self.name);
         Ok(())
     }
 }

@@ -45,21 +45,21 @@ Rosetta uses a `config.yaml` file for all settings.
         homeserver_url: "https://matrix.org"
         username: "startrek_bridge_bot"
         password: "secure_password"
-        bridge_own_messages: false # Always false for bots
 
       my_discord_bot:
         protocol: discord
         bot_token: "YOUR_DISCORD_TOKEN"
-        bridge_own_messages: false
 
     bridges:
       general_chat:
         - service: my_matrix_bot
           channel: "!roomid:matrix.org"
           display_names: true
+          bridge_own_messages: false # Don't bridge the bot's own responses
         - service: my_discord_bot
           channel: "1234567890" # Channel ID
           display_names: true
+          bridge_own_messages: true # Bridge your own messages if using personal account
     ```
 
     > **Tip**: See `config_example.yaml` for full options including Aliases.

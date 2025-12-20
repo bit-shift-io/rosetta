@@ -1,5 +1,5 @@
 # --- Build Stage ---
-FROM rust:alpine3.20 AS builder
+FROM docker.io/rustlang/rust:nightly-alpine3.20 AS builder
 
 ENV PROTOC=/usr/bin/protoc
 ENV OPENSSL_LIB_DIR=/usr/lib
@@ -17,12 +17,22 @@ RUN apk add --no-cache \
     sqlite-dev
 
 WORKDIR /app
-COPY . .
 
-# 2. MODIFIED the build command to include RUSTFLAGS
-# This disables 'crt-static' which prevents the segfault on Alpine
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+# 1. Copy manifests first to cache dependency downloads/builds
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+
+# 2. Build dependencies only (dummy source)
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    RUSTFLAGS="-C target-feature=-crt-static" cargo build --release && \
+    rm -rf src
+
+# 3. Copy real source and final build
+COPY src ./src
+COPY data ./data
+
+# Touch main.rs to ensure the final binary is linked/built with real source
+RUN touch src/main.rs && \
     RUSTFLAGS="-C target-feature=-crt-static" cargo build --release && \
     cp target/release/rosetta /app/rosetta-bin
 

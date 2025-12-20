@@ -32,8 +32,6 @@ pub struct MatrixServiceConfig {
     pub device_id: Option<String>,
     #[serde(default)]
     pub debug: bool,
-    #[serde(default)] // Defaults to false
-    pub bridge_own_messages: bool,
 }
 
 /// WhatsApp-specific service configuration
@@ -43,8 +41,6 @@ pub struct WhatsAppServiceConfig {
     pub session_path: Option<String>,
     #[serde(default)]
     pub debug: bool,
-    #[serde(default)] // Defaults to false
-    pub bridge_own_messages: bool,
 }
 
 /// Discord-specific service configuration
@@ -53,8 +49,6 @@ pub struct DiscordServiceConfig {
     pub bot_token: String,
     #[serde(default)]
     pub debug: bool,
-    #[serde(default)] // Defaults to false
-    pub bridge_own_messages: bool,
 }
 
 /// Channel configuration within a bridge
@@ -70,6 +64,9 @@ pub struct ChannelConfig {
     /// Whether to enable media bridging (images, etc.) for this channel
     #[serde(default = "default_true")]
     pub enable_media: bool,
+    /// Whether to bridge messages sent by the bot/service-user itself in this bridge
+    #[serde(default)]
+    pub bridge_own_messages: bool,
     /// Map of User ID -> Display Name aliases
     #[serde(default)]
     pub aliases: HashMap<String, String>,

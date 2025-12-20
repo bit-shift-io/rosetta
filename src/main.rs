@@ -23,11 +23,17 @@ async fn main() -> Result<()> {
     builder.filter_module("whatsapp_rust", log::LevelFilter::Warn);
     builder.filter_module("whatsapp_rust_tokio_transport", log::LevelFilter::Warn);
     builder.filter_module("whatsapp_rust_ureq_http_client", log::LevelFilter::Warn);
-    builder.filter_module("matrix_sdk_base", log::LevelFilter::Warn);
-    builder.filter_module("matrix_sdk_crypto", log::LevelFilter::Warn);
-    builder.filter_module("ruma_common", log::LevelFilter::Warn);
+    builder.filter_module("wacore", log::LevelFilter::Warn);
+    builder.filter_module("waproto", log::LevelFilter::Warn);
+    builder.filter_module("Client", log::LevelFilter::Warn); // WhatsApp client logs
+    builder.filter_module("matrix_sdk", log::LevelFilter::Warn);
+    builder.filter_module("ruma", log::LevelFilter::Warn);
     builder.filter_module("tracing", log::LevelFilter::Warn);
     builder.filter_module("serenity", log::LevelFilter::Warn);
+    builder.filter_module("h2", log::LevelFilter::Warn);
+    builder.filter_module("hyper", log::LevelFilter::Warn);
+    builder.filter_module("rustls", log::LevelFilter::Warn);
+    builder.filter_module("reqwest", log::LevelFilter::Warn);
     
     builder.init();
 

@@ -105,11 +105,8 @@ impl Service for MatrixService {
             let safe_client = safe_client.clone();
             
             async move {
-                // Ignore own messages (Critical for preventing loops)
-                if event.sender == my_user_id {
-                    return;
-                }
-
+                // Ignore own messages if bridging is disabled
+                let is_own = event.sender == my_user_id;
                 if debug {
                     info!("[Matrix] Event received from {}: {:?}", event.sender, event.content.msgtype);
                 }
@@ -216,7 +213,6 @@ impl Service for MatrixService {
                     }
                 };
 
-                let sender_id = event.sender.to_string();
                 
                 // Get display name from room member
                 let display_name = match room.get_member(&event.sender).await {
@@ -228,12 +224,13 @@ impl Service for MatrixService {
 
                 let msg = ServiceMessage {
                     sender: display_name,
-                    sender_id: sender_id.clone(),
-                    content: body, // Use the body resolved above
-                    attachments,   // Use attachments resolved above
-                    source_service: service_name.clone(),
+                    sender_id: event.sender.to_string(),
+                    content: body.to_string(),
+                    attachments,
+                    source_service: service_name,
                     source_channel: room.room_id().to_string(),
                     source_id: event.event_id.to_string(),
+                    is_own,
                 };
                 
                 match tx.send(ServiceEvent::NewMessage(msg)).await {
@@ -246,34 +243,30 @@ impl Service for MatrixService {
 
 
         // Add handler for Reactions
-        let tx_reaction = tx.clone();
-        let service_name_reaction = service_name.clone();
-        let debug_reaction = debug;
-        let my_user_id_reaction = my_user_id.clone();
-        client.add_event_handler(move |event: OriginalSyncReactionEvent, room: Room| {
-            let tx = tx_reaction.clone();
-            let service_name = service_name_reaction.clone();
-            let debug = debug_reaction;
-            let my_user_id = my_user_id_reaction.clone();
-            async move {
-                if event.sender == my_user_id {
-                    return;
-                }
-                if debug {
-                    info!("[Matrix:{}] Received reaction from {}: {}", service_name, event.sender, event.content.relates_to.key);
-                }
-                let update = crate::services::ServiceReaction {
-                     source_service: service_name.clone(),
-                     source_channel: room.room_id().to_string(),
-                     source_message_id: event.content.relates_to.event_id.to_string(),
-                     sender: event.sender.to_string(), 
-                     emoji: event.content.relates_to.key.clone(),
-                 };
+        let tx_reactions = tx.clone();
+        let service_name_reactions = service_name.clone();
+        let my_user_id_reactions = my_user_id.clone();
+        client.add_event_handler(move |event: OriginalSyncReactionEvent, room: Room| async move {
+                let tx = tx_reactions.clone();
+                let service_name = service_name_reactions.clone();
+                let my_user_id = my_user_id_reactions.clone();
+                
+                let is_own = event.sender == my_user_id;
+                
+                info!("[Matrix:{}] Received reaction '{}' in room {}", service_name, event.content.relates_to.key, room.room_id());
+                
+                let reaction_event = crate::services::ServiceReaction {
+                    source_service: service_name.clone(),
+                    source_channel: room.room_id().to_string(),
+                    source_message_id: event.content.relates_to.event_id.to_string(),
+                    _sender: event.sender.to_string(),
+                    emoji: event.content.relates_to.key.clone(),
+                    is_own,
+                };
                  
-                 if let Err(e) = tx.send(ServiceEvent::NewReaction(update)).await {
-                      error!("[Matrix] Failed to send reaction: {}", e);
+                 if let Err(e) = tx.send(ServiceEvent::NewReaction(reaction_event)).await {
+                      error!("[Matrix] Failed to send reaction event: {}", e);
                  }
-            }
         });
 
         // Start sync in background
@@ -308,7 +301,11 @@ impl Service for MatrixService {
             // 1. Send text content (ONLY if there are no attachments, otherwise text goes in caption)
             let mut last_event_id = String::new();
             if !message.content.is_empty() && message.attachments.is_empty() {
-                 let body = format!("**{}**: {}", message.sender, message.content);
+                 let body = if message.sender.is_empty() {
+                     message.content.clone()
+                 } else {
+                     format!("**{}**: {}", message.sender, message.content)
+                 };
                  
                  // Convert markdown to HTML for Matrix
                  let mut options = pulldown_cmark::Options::empty();
@@ -328,10 +325,11 @@ impl Service for MatrixService {
                 let mime = mime::Mime::from_str(&attachment.mime_type).unwrap_or(mime::APPLICATION_OCTET_STREAM);
                 
                 // Construct plain caption without formatting
-                let caption = if message.content.is_empty() {
-                    format!("Sent by {}", message.sender)
-                } else {
-                    format!("{}: {}", message.sender, message.content)
+                let caption = match (message.sender.is_empty(), message.content.is_empty()) {
+                    (true, true) => "".to_string(),
+                    (true, false) => message.content.clone(),
+                    (false, true) => format!("Sent by {}", message.sender),
+                    (false, false) => format!("{}: {}", message.sender, message.content),
                 };
 
                 let caption_content = TextMessageEventContent::plain(caption);
@@ -397,10 +395,6 @@ impl Service for MatrixService {
         &self.name
     }
 
-    fn should_bridge_own_messages(&self) -> bool {
-        self.config.bridge_own_messages
-    }
-
     fn is_connected(&self) -> bool {
         self.client.is_some()
     }
@@ -429,6 +423,25 @@ impl Service for MatrixService {
     async fn disconnect(&mut self) -> Result<()> {
         // Matrix SDK doesn't require explicit disconnect
         info!("[Matrix:{}] Disconnecting", self.name);
+        Ok(())
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        let client = self.client.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
+        
+        info!("[Matrix:{}] Waiting for initial sync...", self.name);
+        
+        // Wait up to 30 seconds for the client to have some rooms or be synced
+        for _ in 0..30 {
+            if !client.joined_rooms().is_empty() {
+                info!("[Matrix:{}] Synchronized and ready!", self.name);
+                return Ok(());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+        
+        warn!("[Matrix:{}] Wait until ready timed out, but proceeding anyway.", self.name);
         Ok(())
     }
 }

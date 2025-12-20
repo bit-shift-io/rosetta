@@ -37,16 +37,18 @@ impl MessageStore {
         })
     }
     
-    /// Check if a message mapping exists for the given source
-    pub fn exists(&self, source_service: &str, source_channel: &str, source_id: &str) -> anyhow::Result<bool> {
+    /// Check if a message mapping exists for the given service and channel.
+    /// This checks if the message has been processed as either a source OR a destination.
+    pub fn exists(&self, service: &str, channel: &str, message_id: &str) -> anyhow::Result<bool> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT 1 FROM message_map 
-            WHERE source_service = ?1 AND source_channel = ?2 AND source_id = ?3 
+            WHERE (source_service = ?1 AND source_channel = ?2 AND source_id = ?3)
+               OR (dest_service = ?1 AND dest_channel = ?2 AND dest_id = ?3)
             LIMIT 1"
         )?;
         
-        let exists = stmt.exists(params![source_service, source_channel, source_id])?;
+        let exists = stmt.exists(params![service, channel, message_id])?;
         Ok(exists)
     }
 

@@ -69,9 +69,6 @@ impl Service for WhatsAppService {
     async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
         let transport = TokioWebSocketTransportFactory::new();
         let http = UreqHttpClient::new();
-        
-        let service_name = self.name.clone();
-        let debug = self.config.debug;
 
         // Client initialization is handled by Bot::builder below
 
@@ -90,6 +87,9 @@ impl Service for WhatsAppService {
         let backend = SqliteStore::new(&database_path).await?;
         let backend = Arc::new(backend);
         
+        let service_name = self.name.clone();
+        let debug = self.config.debug;
+
         let mut bot = Bot::builder()
             .with_backend(backend)
             .with_transport_factory(transport)
@@ -101,9 +101,7 @@ impl Service for WhatsAppService {
                 async move {
                     match event {
                         WaEvent::Message(msg, info) => {
-                            if info.source.is_from_me {
-                                return;
-                            }
+                            let is_own = info.source.is_from_me;
                             let sender_jid = info.source.sender.to_string();
                             let chat_jid = info.source.chat.to_string();
                             
@@ -144,9 +142,6 @@ impl Service for WhatsAppService {
                                 // Handle Reactions
                                 if let Some(reaction) = &msg.reaction_message {
                                     if let Some(key) = &reaction.key {
-                                        if key.from_me == Some(true) {
-                                            return; 
-                                        }
                                         if debug {
                                             info!("[WhatsApp:{}] Received reaction message: {:?}", service_name, reaction);
                                         }
@@ -155,9 +150,10 @@ impl Service for WhatsAppService {
                                                  source_service: service_name.clone(),
                                                  source_channel: chat_jid.clone(),
                                                  source_message_id: target_id.clone(),
-                                                 sender: display_name.clone(),
-                                                 emoji: reaction.text.clone().unwrap_or_default(),
-                                             };
+                                             _sender: display_name.clone(),
+                                             emoji: reaction.text.clone().unwrap_or_default(),
+                                             is_own,
+                                         };
                                              
                                              if let Err(e) = tx.send(ServiceEvent::NewReaction(reaction_event)).await {
                                                  error!("Failed to send reaction: {}", e);
@@ -171,17 +167,18 @@ impl Service for WhatsAppService {
 
                                 // Only send if we have text OR attachments
                                 if !text.is_empty() || !attachments.is_empty() {
-                                    let msg = ServiceMessage {
+                                    let service_msg = ServiceMessage {
                                         sender: display_name,
                                         sender_id: sender_jid,
                                         content: text,
                                         attachments,
                                         source_service: service_name.clone(),
                                         source_channel: chat_jid,
-                                        source_id: info.id.clone(),
+                                        source_id: info.id.to_string(),
+                                        is_own,
                                     };
                                     
-                                    if let Err(e) = tx.send(ServiceEvent::NewMessage(msg)).await {
+                                    if let Err(e) = tx.send(ServiceEvent::NewMessage(service_msg)).await {
                                         error!("Failed to send internal message: {}", e);
                                     }
                                 }
@@ -221,9 +218,14 @@ impl Service for WhatsAppService {
             // 1. Send text if present
             // 1. Send text if present AND no attachments (otherwise text goes in caption)
             if !message.content.is_empty() && message.attachments.is_empty() {
+                let text = if message.sender.is_empty() {
+                    message.content.clone()
+                } else {
+                    format!("*{}*: {}", message.sender, message.content)
+                };
                 let wa_message = wa::Message {
                     extended_text_message: Some(Box::new(wa::message::ExtendedTextMessage {
-                        text: Some(format!("*{}*: {}", message.sender, message.content)),
+                        text: Some(text),
                         ..Default::default()
                     })),
                     ..Default::default()
@@ -248,7 +250,7 @@ impl Service for WhatsAppService {
                 ).await?;
                 
                 let wa_message = if is_image {
-                     wa::Message {
+                    wa::Message {
                         image_message: Some(Box::new(wa::message::ImageMessage {
                             url: Some(upload.url),
                             direct_path: Some(upload.direct_path),
@@ -257,17 +259,18 @@ impl Service for WhatsAppService {
                             file_enc_sha256: Some(upload.file_enc_sha256),
                             file_sha256: Some(upload.file_sha256),
                             file_length: Some(attachment.data.len() as u64),
-                            caption: Some(if message.content.is_empty() {
-                                format!("*{}*", message.sender)
-                            } else {
-                                format!("*{}*: {}", message.sender, message.content)
+                            caption: Some(match (message.sender.is_empty(), message.content.is_empty()) {
+                                (true, true) => "".to_string(),
+                                (true, false) => message.content.clone(),
+                                (false, true) => format!("*{}*", message.sender),
+                                (false, false) => format!("*{}*: {}", message.sender, message.content),
                             }),
                             ..Default::default()
                         })),
                         ..Default::default()
                     }
                 } else {
-                     wa::Message {
+                    wa::Message {
                         document_message: Some(Box::new(wa::message::DocumentMessage {
                             url: Some(upload.url),
                             direct_path: Some(upload.direct_path),
@@ -329,10 +332,6 @@ impl Service for WhatsAppService {
         &self.name
     }
 
-    fn should_bridge_own_messages(&self) -> bool {
-        self.config.bridge_own_messages
-    }
-
     fn is_connected(&self) -> bool {
         self.client.is_some()
     }
@@ -340,6 +339,17 @@ impl Service for WhatsAppService {
     async fn disconnect(&mut self) -> Result<()> {
         info!("[WhatsApp:{}] Disconnecting", self.name);
         // WhatsApp client cleanup handled by drop
+        Ok(())
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        info!("[WhatsApp:{}] Waiting for connection to stabilize...", self.name);
+        // WhatsApp doesn't have a simple "is synced" flag we can easily poll, 
+        // but we can check if client exists and give it a moment.
+        if self.client.is_some() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            info!("[WhatsApp:{}] Ready!", self.name);
+        }
         Ok(())
     }
 }

@@ -6,7 +6,7 @@ services:
     homeserver_url: "https://matrix.org"
     username: "user"
     password: "pass"
-    debug: true
+    debug: false
 
   whatsapp:
     protocol: whatsapp
@@ -15,15 +15,10 @@ services:
     session_path: "data/whatsapp_session"
     debug: false
 
-  whatsapp_direct:
-    protocol: whatsapp
-    debug: true
-
   discord_direct:
     protocol: discord
     bot_token: "your_discord_bot_token_here"
-    debug: true
-    bridge_own_messages: false
+    debug: false
 
 # bridges are connections between channels/rooms
 # you can link between as many services and channels as you like
@@ -33,11 +28,18 @@ bridges:
     - service: matrix_bot
       channel: "!room:matrix.org"
       display_names: true
+      # Whether to bridge messages sent by this account in this room (default: false)
+      # Usually false for bots, but may be true if using a personal account
+      bridge_own_messages: false
+      enable_media: true
       aliases:
         "@user:matrix.org": "Bob"
-    - service: whatsapp_bot
+    - service: whatsapp
       channel: "00000@lid"
       display_names: true
+      enable_media: true
+      # Example: bridge your own messages sent from your phone
+      bridge_own_messages: true
       aliases:
         "1234567890@s.whatsapp.net": "Alice"
         "00000@lid": "MySelf"
@@ -47,7 +49,9 @@ bridges:
       channel: "!room:matrix.org"
       display_names: true
       enable_media: true
+      bridge_own_messages: false
     - service: discord_direct
-      channel: "1234567890"  # Discord channel ID (right-click channel -> Copy ID)
+      channel: "1234567890" # Discord channel ID (right-click channel -> Copy ID)
       display_names: true
+      bridge_own_messages: false
       enable_media: false # Example: Disable media sending to Discord (text only)

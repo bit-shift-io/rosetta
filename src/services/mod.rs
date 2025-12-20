@@ -27,6 +27,8 @@ pub struct ServiceMessage {
     pub source_channel: String,
     /// Source message identifier (for editing/replying)
     pub source_id: String,
+    /// Whether this message was sent by the bot itself on the source service
+    pub is_own: bool,
 }
 
 // Re-export service implementations
@@ -49,8 +51,10 @@ pub struct ServiceReaction {
     pub source_service: String,
     pub source_channel: String,
     pub source_message_id: String,
-    pub sender: String,
+    pub _sender: String,
     pub emoji: String,
+    /// Whether this reaction was sent by the bot itself on the source service
+    pub is_own: bool,
 }
 
 /// Enum covering all events a service can emit
@@ -82,11 +86,6 @@ pub trait Service: Send + Sync {
     /// React to a message
     async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()>;
     
-    /// Whether this service should bridge its own messages
-    fn should_bridge_own_messages(&self) -> bool {
-        false
-    }
-    
     /// Get the service name
     #[allow(dead_code)]
     fn service_name(&self) -> &str;
@@ -105,4 +104,10 @@ pub trait Service: Send + Sync {
     /// Disconnect from the service
     #[allow(dead_code)]
     async fn disconnect(&mut self) -> Result<()>;
+
+    /// Wait until the service is fully initialized and synchronized
+    /// Default implementation is a no-op that returns immediately
+    async fn wait_until_ready(&self) -> Result<()> {
+        Ok(())
+    }
 }

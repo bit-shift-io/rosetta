@@ -27,7 +27,8 @@ impl BridgeCoordinator {
     /// Start all bridges and begin routing messages
     pub async fn start(&self) -> Result<()> {
         info!("Starting Bridge Coordinator...");
-        let (tx, mut rx) = mpsc::channel::<ServiceEvent>(100);
+        // ... existing code ...
+        let (tx, mut event_rx) = mpsc::channel::<ServiceEvent>(100);
 
         // Start all services
         for (service_name, service) in &self.services {
@@ -37,13 +38,23 @@ impl BridgeCoordinator {
                 Err(e) => error!("Failed to start service {}: {}", service_name, e),
             }
         }
+        
+        // Wait for all services to be ready before starting the routing loop
+        info!("Waiting for all services to be synchronized...");
+        for (name, service) in &self.services {
+            let svc = service.lock().await;
+            if let Err(e) = svc.wait_until_ready().await {
+                error!("Service {} failed to become ready: {}", name, e);
+            }
+        }
+        info!("All services ready. Starting message routing.");
 
         let services = self.services.clone();
         let config = self.config.clone();
         let store = self.store.clone();
 
         // Message routing loop - blocks until cancelled or rx closed
-        while let Some(event) = rx.recv().await {
+        while let Some(event) = event_rx.recv().await {
              match event {
                  ServiceEvent::NewMessage(msg) => {
                      Self::route_message(msg, &services, &config, &store).await;
@@ -52,14 +63,12 @@ impl BridgeCoordinator {
                      Self::handle_edit(update, &services, &config, &store).await;
                  },
                  ServiceEvent::NewReaction(reaction) => {
-                     Self::handle_reaction(reaction, &services, &config, &store).await;
+                     self.handle_reaction(reaction, &config, &store).await;
                  }
              }
         }
         
         Ok(())
-
-
     }
 
     /// Route a message from one service to all other services in the same bridge
@@ -77,13 +86,12 @@ impl BridgeCoordinator {
         // Deduplication: Check if we've already processed this message
         match store.exists(&msg.source_service, &msg.source_channel, &msg.source_id) {
             Ok(true) => {
-                warn!("Duplicate key ignored: {}:{}:{}", msg.source_service, msg.source_channel, msg.sender_id); // Wait sender_id? No source_id
                 warn!("Duplicate message ignored: {}:{}:{}", msg.source_service, msg.source_channel, msg.source_id);
                 return;
             },
             Err(e) => {
                 error!("Failed to check for duplicate message: {}", e);
-                // Proceed cautiously or return? Proceeding risks dupes, but DB failure logic.
+                // Proceed cautiously
             },
             _ => {}
         }
@@ -94,36 +102,22 @@ impl BridgeCoordinator {
         for (bridge_name, channels) in &config.bridges {
             // Find the source channel config
             let source_channel = channels.iter().find(|ch| {
-                // Debug log matching attempts (info level for now to debug)
-                // info!("Checking bridge '{}': {}/{} vs msg {}/{}", 
-                //    bridge_name, ch.service, ch.channel, msg.source_service, msg.source_channel);
                 ch.service == msg.source_service && ch.channel == msg.source_channel
             });
 
-            if source_channel.is_none() {
-                // Determine if we should log this rejection (debug only)
-                // We don't have access to global debug flag here easily without config, 
-                // but unlikely to spam if it's not matching any bridge.
-                // For now, let's log valuable debug info if we can't find a bridge.
-                // Note: This matches EVERY bridge loop, so it would spam if we log "not found in bridge X".
+            if let Some(source_config) = source_channel {
+                matched_any_bridge = true;
+
+                if msg.is_own && !source_config.bridge_own_messages {
+                    info!("[Bridge] Skipping own message from {}:{} in bridge '{}' as bridging is disabled for this channel.", 
+                        msg.source_service, msg.source_channel, bridge_name);
+                    continue;
+                }
+            } else {
                 continue;
             }
             
-            matched_any_bridge = true;
             let source_config = source_channel.unwrap();
-
-            // Check if we should bridge own messages
-            // We need to look up the service instance to check its config
-            let should_bridge_own = if let Some(service) = services.get(msg.source_service.as_str()) {
-                 let svc = service.lock().await;
-                 svc.should_bridge_own_messages()
-            } else {
-                false
-            };
-
-            if msg.sender_id.contains(&msg.source_service) && !should_bridge_own {
-                continue;
-            }
 
             // Handle .status command
             if msg.content.trim() == ".status" {
@@ -181,34 +175,29 @@ impl BridgeCoordinator {
                     source_service: "bridge".to_string(),
                     source_channel: "system".to_string(),
                     source_id: "system".to_string(),
+                    is_own: true,
                 };
                 
-                // Broadcast status to all channels in this bridge
-                for ch in channels {
-                    if let Some(svc_lock) = services.get(ch.service.as_str()) {
-                        let svc = svc_lock.lock().await;
-                        if let Err(e) = svc.send_message(&ch.channel, &status_msg).await {
-                             error!("Failed to send status to {}:{}: {}", ch.service, ch.channel, e);
-                        }
+                // Send status response only to the channel that requested it
+                if let Some(svc_lock) = services.get(msg.source_service.as_str()) {
+                    let svc = svc_lock.lock().await;
+                    if let Err(e) = svc.send_message(&msg.source_channel, &status_msg).await {
+                         error!("Failed to send status to {}:{}: {}", msg.source_service, msg.source_channel, e);
                     }
                 }
                 
-                // Allow forwarding of the original .status message (User requested)
-                // continue; 
+                // Skip further processing
+                continue;
             }
 
-            // Apply alias if configured
-            let display_name = if source_config.display_names {
-                source_config
-                    .aliases
-                    .get(&msg.sender_id)
-                    .cloned()
-                    .unwrap_or_else(|| msg.sender.clone())
-            } else {
-                msg.sender.clone()
-            };
+            // Resolve sender name (applying aliases if configured)
+            let display_name = source_config
+                .aliases
+                .get(&msg.sender_id)
+                .cloned()
+                .unwrap_or_else(|| msg.sender.clone());
 
-            // Create modified message with alias applied
+            // Create modified message with alias applied (or suppressed)
             let modified_msg = ServiceMessage {
                 sender: display_name,
                 ..msg.clone()
@@ -228,10 +217,13 @@ impl BridgeCoordinator {
                 if let Some(service_lock) = services.get(target_channel.service.as_str()) {
                     let service = service_lock.lock().await;
                     
-                    // Create outgoing message, optionally stripping media
+                    // Create outgoing message, optionally stripping media OR suppressing name
                     let mut outgoing_msg = modified_msg.clone();
                     if !target_channel.enable_media {
                         outgoing_msg.attachments.clear();
+                    }
+                    if !target_channel.display_names {
+                        outgoing_msg.sender = "".to_string();
                     }
                     
                     info!("[Bridge:{}] Forwarded message from {}:{} to {}:{}", 
@@ -292,9 +284,9 @@ impl BridgeCoordinator {
                          let service = service_lock.lock().await;
                          
                          if let Err(e) = service.edit_message(&dest_channel, &dest_id, &update.new_content).await {
-                               error!("Failed to edit message in {}:{}: {}", dest_service, dest_channel, e);
+                                error!("Failed to edit message in {}:{}: {}", dest_service, dest_channel, e);
                          } else {
-                               info!("Edited message in {}:{}", dest_service, dest_channel);
+                                info!("Edited message in {}:{}", dest_service, dest_channel);
                          }
                      }
                  }
@@ -305,42 +297,49 @@ impl BridgeCoordinator {
          }
     }
 
-    async fn handle_reaction(
+    pub async fn handle_reaction(
+        &self,
         reaction: crate::services::ServiceReaction,
-        services: &HashMap<String, Arc<tokio::sync::Mutex<Box<dyn Service>>>>,
-        _config: &Config,
+        config: &Config,
         store: &MessageStore,
     ) {
-        info!("Processing reaction '{}' from {} in {}:{}:{}", reaction.emoji, reaction.sender, reaction.source_service, reaction.source_channel, reaction.source_message_id);
+        // Find which bridge(s) this reaction belongs to and check if we should bridge it
+        for (bridge_name, channels) in config.bridges.iter() {
+            let source_channel = channels.iter().find(|ch| {
+                ch.service == reaction.source_service && ch.channel == reaction.source_channel
+            });
+
+            if let Some(source_config) = source_channel {
+                if reaction.is_own && !source_config.bridge_own_messages {
+                    info!("[Bridge] Skipping own reaction from {}:{} in bridge '{}' as bridging is disabled.", 
+                        reaction.source_service, reaction.source_channel, bridge_name);
+                    return;
+                }
+            }
+        }
 
         // Find all related messages for this source/dest
         match store.get_associated_mappings(&reaction.source_service, &reaction.source_channel, &reaction.source_message_id) {
             Ok(mappings) => {
                 for (dest_service, dest_channel, dest_id) in mappings {
-                    info!("Forwarding reaction to {}:{}:{}", dest_service, dest_channel, dest_id);
-                    if let Some(service_lock) = services.get(&dest_service) {
+                    if let Some(service_lock) = self.services.get(&dest_service) {
                         let service = service_lock.lock().await;
+                        info!("[Bridge] Forwarding reaction '{}' to {}:{}", reaction.emoji, dest_service, dest_channel);
                         
-                        // We forward the reaction blindly to the destination message
                         if let Err(e) = service.react_to_message(&dest_channel, &dest_id, &reaction.emoji).await {
-                             // Log as warn, reactions often fail due to constraints (deleted msg, etc)
-                             warn!("Failed to react in {}:{}: {}", dest_service, dest_channel, e);
-                        } else {
-                             info!("Reacted in {}:{}", dest_service, dest_channel);
+                             warn!("[Bridge] Failed to forward reaction to {}: {}", dest_service, e);
                         }
                     }
                 }
             },
             Err(e) => {
-                 warn!("Reaction ignored (message lookup failed): {}", e);
+                warn!("[Bridge] Reaction ignored (message lookup failed): {}", e);
             }
         }
     }
 
-    /// Graceful shutdown: broadcast exit message
-    /// Graceful shutdown: broadcast exit message
+    /// Graceful shutdown
     pub async fn shutdown(&self) {
         info!("Shutting down bridge...");
-        // User requested to disable "Goodbye" message
     }
 }
