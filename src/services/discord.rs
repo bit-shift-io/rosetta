@@ -25,6 +25,7 @@ struct DiscordHandler {
     tx: mpsc::Sender<ServiceEvent>,
     service_name: String,
     debug: bool,
+    display_name: Option<String>,
 }
 
 #[serenity_async_trait]
@@ -184,13 +185,20 @@ impl EventHandler for DiscordHandler {
         }
     }
 
-    async fn message_update(&self, _ctx: Context, _old_if_available: Option<Message>, _new: Option<Message>, event: MessageUpdateEvent) {
+    async fn message_update(&self, ctx: Context, _old_if_available: Option<Message>, _new: Option<Message>, event: MessageUpdateEvent) {
         if let Some(content) = event.content {
+             let is_own = if let Some(author) = &event.author {
+                 author.id == ctx.cache.current_user().id
+             } else {
+                 false
+             };
+
              let update = ServiceUpdate {
                  source_service: self.service_name.clone(),
                  source_channel: event.channel_id.to_string(),
                  source_id: event.id.to_string(),
                  new_content: content,
+                 is_own,
              };
              
              if let Err(e) = self.tx.send(ServiceEvent::UpdateMessage(update)).await {
@@ -229,8 +237,30 @@ impl EventHandler for DiscordHandler {
         }
     }
 
-    async fn ready(&self, _ctx: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         info!("[Discord:{}] Bot is ready as {}", self.service_name, ready.user.name);
+        
+        // Update display name (username) if configured
+        if let Some(target_name) = &self.display_name {
+            if ready.user.name != *target_name {
+                 info!("[Discord:{}] Updating username to '{}'...", self.service_name, target_name);
+                 
+                 // Fetch current user to edit
+                 match ctx.http.get_current_user().await {
+                     Ok(mut user) => {
+                         let builder = serenity::builder::EditProfile::new().username(target_name);
+                         if let Err(e) = user.edit(&ctx, builder).await {
+                             error!("[Discord:{}] Failed to update username: {}", self.service_name, e);
+                         } else {
+                             info!("[Discord:{}] Username updated successfully!", self.service_name);
+                         }
+                     },
+                     Err(e) => {
+                         error!("[Discord:{}] Failed to fetch current user: {}", self.service_name, e);
+                     }
+                 }
+            }
+        }
     }
 }
 
@@ -276,6 +306,7 @@ impl Service for DiscordService {
             tx,
             service_name: self.name.clone(),
             debug: self.config.debug,
+            display_name: self.config.display_name.clone(),
         };
 
         let client = Client::builder(&self.config.bot_token, intents)

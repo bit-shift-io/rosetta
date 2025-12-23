@@ -31,7 +31,10 @@ pub struct MatrixServiceConfig {
     #[allow(dead_code)]
     pub device_id: Option<String>,
     #[serde(default)]
+
     pub debug: bool,
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// WhatsApp-specific service configuration
@@ -41,6 +44,8 @@ pub struct WhatsAppServiceConfig {
     pub session_path: Option<String>,
     #[serde(default)]
     pub debug: bool,
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// Discord-specific service configuration
@@ -49,6 +54,8 @@ pub struct DiscordServiceConfig {
     pub bot_token: String,
     #[serde(default)]
     pub debug: bool,
+    #[serde(default)]
+    pub display_name: Option<String>,
 }
 
 /// Channel configuration within a bridge

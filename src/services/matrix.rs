@@ -60,6 +60,15 @@ impl Service for MatrixService {
             
         info!("[Matrix:{}] Logged in as user: {}", self.name, client.user_id().unwrap());
         
+        // Set display name if configured
+        if let Some(display_name) = &self.config.display_name {
+             if let Err(e) = client.account().set_display_name(Some(display_name)).await {
+                 error!("Failed to set display name: {}", e);
+             } else {
+                 info!("[Matrix:{}] Set display name to: {}", self.name, display_name);
+             }
+        }
+        
         // Auto-join invitations
         client.add_event_handler(|_event: matrix_sdk::ruma::events::room::member::StrippedRoomMemberEvent, room: Room| async move {
             if room.state() == matrix_sdk::RoomState::Invited {
@@ -135,6 +144,10 @@ impl Service for MatrixService {
 
                 // Handle Edits (m.replace)
                 if let Some(matrix_sdk::ruma::events::room::message::Relation::Replacement(replacement)) = &event.content.relates_to {
+                    if is_own {
+                        if debug { info!("[Matrix] Ignoring own edit loop"); }
+                        return;
+                    }
                     let new_body = match &replacement.new_content.msgtype {
                          MessageType::Text(t) => t.body.clone(),
                          _ => "Unsupported edit content".to_string(),
@@ -145,6 +158,7 @@ impl Service for MatrixService {
                          source_channel: room.room_id().to_string(),
                          source_id: replacement.event_id.to_string(), // The original event ID
                          new_content: new_body,
+                         is_own,
                      };
                      
                      if let Err(e) = tx.send(ServiceEvent::UpdateMessage(update)).await {

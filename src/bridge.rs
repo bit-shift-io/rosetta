@@ -271,11 +271,34 @@ impl BridgeCoordinator {
     async fn handle_edit(
         update: ServiceUpdate,
         services: &HashMap<String, Arc<tokio::sync::Mutex<Box<dyn Service>>>>,
-        _config: &Config,
+        config: &Config,
         store: &MessageStore,
     ) {
          info!("Processing edit from {}:{}:{}", update.source_service, update.source_channel, update.source_id);
          
+         // Check if we should bridge own messages/edits
+         if update.is_own {
+             let mut allow = false;
+             // Find config definition
+             for (bridge_name, channels) in &config.bridges {
+                 if let Some(source_config) = channels.iter().find(|ch| 
+                     ch.service == update.source_service && ch.channel == update.source_channel
+                 ) {
+                     if source_config.bridge_own_messages {
+                         allow = true;
+                         break;
+                     } else {
+                         info!("[Bridge] Skipping own edit from {}:{} in bridge '{}'", 
+                             update.source_service, update.source_channel, bridge_name);
+                     }
+                 }
+             }
+             
+             if !allow {
+                 return;
+             }
+         }
+
          // Find all related messages for this source/dest
          match store.get_associated_mappings(&update.source_service, &update.source_channel, &update.source_id) {
              Ok(mappings) => {

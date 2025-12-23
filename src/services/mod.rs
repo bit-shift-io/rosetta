@@ -43,6 +43,7 @@ pub struct ServiceUpdate {
     pub source_channel: String,
     pub source_id: String,
     pub new_content: String,
+    pub is_own: bool,
 }
 
 /// Represents a reaction to a message
