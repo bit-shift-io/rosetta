@@ -1,3 +1,12 @@
+# Global media scraping whitelist
+# Link scraping for images/GIFs will only be performed on domains listed below.
+# If this list is empty or omitted, link scraping is disabled entirely.
+media_whitelist:
+  - "tenor.com"
+  - "giphy.com"
+  - "imgur.com"
+  - "klipy.com"
+
 # services have a name, and their connection settings
 # you may have multiple services of the same protocol
 services:

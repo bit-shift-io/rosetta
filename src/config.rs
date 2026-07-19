@@ -10,6 +10,9 @@ pub struct Config {
     pub services: HashMap<String, ServiceConfig>,
     /// Map of bridge name to bridge configuration
     pub bridges: HashMap<String, Vec<ChannelConfig>>,
+    /// Global media scraping whitelist
+    #[serde(default)]
+    pub media_whitelist: Vec<String>,
 }
 
 /// Service configuration - tagged by protocol type

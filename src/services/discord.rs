@@ -26,6 +26,7 @@ struct DiscordHandler {
     service_name: String,
     debug: bool,
     display_name: Option<String>,
+    media_whitelist: Vec<String>,
 }
 
 #[serenity_async_trait]
@@ -99,10 +100,30 @@ impl EventHandler for DiscordHandler {
                 .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
                 .unwrap_or_default();
-
             for url in urls_to_process {
+                // Check if the URL domain is in the media whitelist.
+                // If whitelist is empty, no URLs are scraped (secure by default).
+                let is_allowed = if let Ok(parsed_url) = Url::parse(&url) {
+                    if let Some(host) = parsed_url.host_str() {
+                        self.media_whitelist.iter().any(|domain| {
+                            host == domain || host.ends_with(&format!(".{}", domain))
+                        })
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !is_allowed {
+                    if self.debug {
+                        info!("[Discord DEBUG] Skipping URL (not in media whitelist): {}", url);
+                    }
+                    continue;
+                }
+
                 // Check if it's media
-                 match client.get(&url).send().await {
+                match client.get(&url).send().await {
                      Ok(resp) => {
                          let mime = resp.headers().get("content-type")
                              .and_then(|v| v.to_str().ok())
@@ -271,16 +292,18 @@ pub struct DiscordService {
     client: Option<Arc<TokioMutex<Client>>>,
     http: Option<Arc<serenity::http::Http>>,
     cache: Option<Arc<serenity::cache::Cache>>,
+    media_whitelist: Vec<String>,
 }
 
 impl DiscordService {
-    pub fn new(name: String, config: DiscordServiceConfig) -> Self {
+    pub fn new(name: String, config: DiscordServiceConfig, media_whitelist: Vec<String>) -> Self {
         Self {
             name,
             config,
             client: None,
             http: None,
             cache: None,
+            media_whitelist,
         }
     }
 }
@@ -307,6 +330,7 @@ impl Service for DiscordService {
             service_name: self.name.clone(),
             debug: self.config.debug,
             display_name: self.config.display_name.clone(),
+            media_whitelist: self.media_whitelist.clone(),
         };
 
         let client = Client::builder(&self.config.bot_token, intents)

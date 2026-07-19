@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
                 Box::new(WhatsAppService::new(service_name.clone(), cfg.clone()))
             }
             ServiceConfig::Discord(cfg) => {
-                Box::new(DiscordService::new(service_name.clone(), cfg.clone()))
+                Box::new(DiscordService::new(service_name.clone(), cfg.clone(), config.media_whitelist.clone()))
             }
         };
 
