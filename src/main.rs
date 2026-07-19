@@ -1,24 +1,27 @@
 #![recursion_limit = "256"]
 use anyhow::Result;
-use log::{info, error};
+use log::{error, info};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-mod config;
-mod services;
 mod bridge;
+mod config;
 mod persistence;
+mod services;
 
-use config::{Config, ServiceConfig};
-use services::{Service, matrix::MatrixService, whatsapp::WhatsAppService, discord::DiscordService};
 use bridge::BridgeCoordinator;
+use config::{Config, ServiceConfig};
+use services::{
+    Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logger with filters to reduce noise
-    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
-    
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+
     // Silence noisy libraries
     builder.filter_module("whatsapp_rust", log::LevelFilter::Warn);
     builder.filter_module("whatsapp_rust_tokio_transport", log::LevelFilter::Warn);
@@ -27,6 +30,7 @@ async fn main() -> Result<()> {
     builder.filter_module("waproto", log::LevelFilter::Warn);
     builder.filter_module("Client", log::LevelFilter::Warn); // WhatsApp client logs
     builder.filter_module("matrix_sdk", log::LevelFilter::Warn);
+    builder.filter_module("matrix_sdk_crypto", log::LevelFilter::Error);
     builder.filter_module("ruma", log::LevelFilter::Warn);
     builder.filter_module("tracing", log::LevelFilter::Warn);
     builder.filter_module("serenity", log::LevelFilter::Warn);
@@ -34,20 +38,25 @@ async fn main() -> Result<()> {
     builder.filter_module("hyper", log::LevelFilter::Warn);
     builder.filter_module("rustls", log::LevelFilter::Warn);
     builder.filter_module("reqwest", log::LevelFilter::Warn);
-    
+
     builder.init();
 
     // Load configuration
     let config = Config::load("data/config.yaml")?;
-    
-    info!("Loaded configuration with {} services and {} bridges", 
-        config.services.len(), config.bridges.len());
+
+    info!(
+        "Loaded configuration with {} services and {} bridges",
+        config.services.len(),
+        config.bridges.len()
+    );
 
     // Initialize all services
     let mut services: HashMap<String, Arc<Mutex<Box<dyn Service>>>> = HashMap::new();
 
     for (service_name, service_config) in &config.services {
-        info!("Initializing service: {} ({:?})", service_name, 
+        info!(
+            "Initializing service: {} ({:?})",
+            service_name,
             match service_config {
                 ServiceConfig::Matrix(_) => "Matrix",
                 ServiceConfig::WhatsApp(_) => "WhatsApp",
@@ -62,13 +71,15 @@ async fn main() -> Result<()> {
             ServiceConfig::WhatsApp(cfg) => {
                 Box::new(WhatsAppService::new(service_name.clone(), cfg.clone()))
             }
-            ServiceConfig::Discord(cfg) => {
-                Box::new(DiscordService::new(service_name.clone(), cfg.clone(), config.media_whitelist.clone()))
-            }
+            ServiceConfig::Discord(cfg) => Box::new(DiscordService::new(
+                service_name.clone(),
+                cfg.clone(),
+                config.media_whitelist.clone(),
+            )),
         };
 
         let service = Arc::new(Mutex::new(service));
-        
+
         // Connect to the service
         {
             let mut svc = service.lock().await;
@@ -90,7 +101,11 @@ async fn main() -> Result<()> {
 
     // Log bridge configuration
     for (bridge_name, channels) in &config.bridges {
-        info!("Bridge '{}' connects {} channels:", bridge_name, channels.len());
+        info!(
+            "Bridge '{}' connects {} channels:",
+            bridge_name,
+            channels.len()
+        );
         for channel in channels {
             info!("  - {}:{}", channel.service, channel.channel);
         }
