@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::sync::{Arc, Mutex};
 
 /// Manages persistent storage for message ID mapping
@@ -10,7 +10,7 @@ pub struct MessageStore {
 impl MessageStore {
     pub fn new(path: &str) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
-        
+
         // Create table if not exists
         conn.execute(
             "CREATE TABLE IF NOT EXISTS message_map (
@@ -25,18 +25,18 @@ impl MessageStore {
             )",
             [],
         )?;
-        
+
         // Index for fast lookups by source ID
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_source ON message_map(source_service, source_channel, source_id)",
             [],
         )?;
-        
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-    
+
     /// Check if a message mapping exists for the given service and channel.
     /// This checks if the message has been processed as either a source OR a destination.
     pub fn exists(&self, service: &str, channel: &str, message_id: &str) -> anyhow::Result<bool> {
@@ -45,9 +45,9 @@ impl MessageStore {
             "SELECT 1 FROM message_map 
             WHERE (source_service = ?1 AND source_channel = ?2 AND source_id = ?3)
                OR (dest_service = ?1 AND dest_channel = ?2 AND dest_id = ?3)
-            LIMIT 1"
+            LIMIT 1",
         )?;
-        
+
         let exists = stmt.exists(params![service, channel, message_id])?;
         Ok(exists)
     }
@@ -67,11 +67,18 @@ impl MessageStore {
             "INSERT OR REPLACE INTO message_map 
             (source_service, source_channel, source_id, dest_service, dest_channel, dest_id)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![source_service, source_channel, source_id, dest_service, dest_channel, dest_id],
+            params![
+                source_service,
+                source_channel,
+                source_id,
+                dest_service,
+                dest_channel,
+                dest_id
+            ],
         )?;
         Ok(())
     }
-    
+
     /// Find all other message instances associated with this one (Source <=> Dests)
     /// Returns Vec<(dest_service, dest_channel, dest_id)>
     pub fn get_associated_mappings(
@@ -81,16 +88,20 @@ impl MessageStore {
         message_id: &str,
     ) -> anyhow::Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock().unwrap();
-        
+
         // Find the canonical source for this message ID (it could be the source OR a destination)
         let mut stmt = conn.prepare(
             "SELECT DISTINCT source_service, source_channel, source_id FROM message_map 
              WHERE (source_service = ?1 AND source_id = ?2) 
-                OR (dest_service = ?1 AND dest_id = ?2)"
+                OR (dest_service = ?1 AND dest_id = ?2)",
         )?;
-        
+
         let canon = stmt.query_row(params![service, message_id], |row| {
-           Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         });
 
         match canon {
@@ -100,11 +111,15 @@ impl MessageStore {
                      FROM message_map 
                      WHERE source_service = ?1 AND source_id = ?2"
                 )?;
-                
+
                 let rows = stmt_all.query_map(params![c_svc, c_id], |row| {
                     Ok((
-                        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, // source
-                        row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, // dest
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?, // source
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?, // dest
                     ))
                 })?;
 
@@ -118,10 +133,14 @@ impl MessageStore {
                 }
 
                 // Remove the one we started with
-                set.remove(&(service.to_string(), channel.to_string(), message_id.to_string()));
+                set.remove(&(
+                    service.to_string(),
+                    channel.to_string(),
+                    message_id.to_string(),
+                ));
 
                 Ok(set.into_iter().collect())
-            },
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(vec![]),
             Err(e) => Err(anyhow::anyhow!("Lookup error: {}", e)),
         }

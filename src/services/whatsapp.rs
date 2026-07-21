@@ -1,25 +1,23 @@
-use async_trait::async_trait;
 use anyhow::Result;
-use log::{info, error};
+use async_trait::async_trait;
+use log::{error, info};
+use std::any::Any;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use std::str::FromStr;
 
 // Modern wa-rs ecosystem migrations
-use wa_rs::{
-    bot::Bot,
-    store::SqliteStore,
-};
-use wa_rs_core::types::events::Event as WaEvent;
 use wa_rs::proto_helpers::MessageExt;
-use wa_rs_tokio_transport::TokioWebSocketTransportFactory;
-use wa_rs_ureq_http::UreqHttpClient;
 use wa_rs::wa_rs_proto::whatsapp as wa;
 use wa_rs::wa_rs_proto::whatsapp::MessageKey;
+use wa_rs::{bot::Bot, store::SqliteStore};
 use wa_rs_binary::jid::Jid;
+use wa_rs_core::types::events::Event as WaEvent;
+use wa_rs_tokio_transport::TokioWebSocketTransportFactory;
+use wa_rs_ureq_http::UreqHttpClient;
 
-use crate::services::{Service, ServiceMessage, ServiceEvent};
 use crate::config::WhatsAppServiceConfig;
+use crate::services::{Service, ServiceEvent, ServiceMessage};
 
 pub struct WhatsAppService {
     name: String,
@@ -40,7 +38,11 @@ impl WhatsAppService {
 #[async_trait]
 impl Service for WhatsAppService {
     async fn connect(&mut self) -> Result<()> {
-        let database_path = self.config.session_path.clone().unwrap_or_else(|| "whatsapp.db".to_string());
+        let database_path = self
+            .config
+            .session_path
+            .clone()
+            .unwrap_or_else(|| "whatsapp.db".to_string());
 
         // Ensure directory exists
         if let Some(parent) = std::path::Path::new(&database_path).parent() {
@@ -72,7 +74,11 @@ impl Service for WhatsAppService {
         let transport = TokioWebSocketTransportFactory::new();
         let http = UreqHttpClient::new();
 
-        let database_path = self.config.session_path.clone().unwrap_or_else(|| "whatsapp.db".to_string());
+        let database_path = self
+            .config
+            .session_path
+            .clone()
+            .unwrap_or_else(|| "whatsapp.db".to_string());
 
         // Ensure directory exists
         if let Some(parent) = std::path::Path::new(&database_path).parent() {
@@ -114,27 +120,37 @@ impl Service for WhatsAppService {
                             let text = msg.text_content().unwrap_or("").to_string();
 
                             if debug {
-                                info!("[WhatsApp DEBUG] Msg in Chat: {} From: {} Content: {}",
-                                    chat_jid, sender_jid, text);
+                                info!(
+                                    "[WhatsApp DEBUG] Msg in Chat: {} From: {} Content: {}",
+                                    chat_jid, sender_jid, text
+                                );
                             } else {
-                                info!("[WhatsApp:{}] Received message in chat: {}", service_name, chat_jid);
+                                info!(
+                                    "[WhatsApp:{}] Received message in chat: {}",
+                                    service_name, chat_jid
+                                );
                             }
 
                             let mut attachments = Vec::new();
 
                             // Handle Image messages
                             if let Some(image_msg) = &msg.image_message {
-                                if debug { info!("[WhatsApp DEBUG] Received image message"); }
+                                if debug {
+                                    info!("[WhatsApp DEBUG] Received image message");
+                                }
 
                                 // Dereference the Box to get the inner ImageMessage which implements Downloadable
                                 match client.download(&**image_msg).await {
                                     Ok(data) => {
                                         attachments.push(crate::services::Attachment {
                                             filename: "image.jpg".to_string(),
-                                            mime_type: image_msg.mimetype.clone().unwrap_or("image/jpeg".to_string()),
+                                            mime_type: image_msg
+                                                .mimetype
+                                                .clone()
+                                                .unwrap_or("image/jpeg".to_string()),
                                             data,
                                         });
-                                    },
+                                    }
                                     Err(e) => error!("[WhatsApp] Failed to download media: {}", e),
                                 }
                             }
@@ -143,22 +159,27 @@ impl Service for WhatsAppService {
                             if let Some(reaction) = &msg.reaction_message {
                                 if let Some(key) = &reaction.key {
                                     if debug {
-                                        info!("[WhatsApp:{}] Received reaction message: {:?}", service_name, reaction);
+                                        info!(
+                                            "[WhatsApp:{}] Received reaction message: {:?}",
+                                            service_name, reaction
+                                        );
                                     }
                                     if let Some(target_id) = &key.id {
-                                         let reaction_event = crate::services::ServiceReaction {
-                                             source_service: service_name.clone(),
-                                             source_channel: chat_jid.clone(),
-                                             source_message_id: target_id.clone(),
-                                             _sender: display_name.clone(),
-                                             emoji: reaction.text.clone().unwrap_or_default(),
-                                             is_own,
-                                         };
+                                        let reaction_event = crate::services::ServiceReaction {
+                                            source_service: service_name.clone(),
+                                            source_channel: chat_jid.clone(),
+                                            source_message_id: target_id.clone(),
+                                            _sender: display_name.clone(),
+                                            emoji: reaction.text.clone().unwrap_or_default(),
+                                            is_own,
+                                        };
 
-                                         if let Err(e) = tx.send(ServiceEvent::NewReaction(reaction_event)).await {
-                                             error!("Failed to send reaction: {}", e);
-                                         }
-                                         return;
+                                        if let Err(e) =
+                                            tx.send(ServiceEvent::NewReaction(reaction_event)).await
+                                        {
+                                            error!("Failed to send reaction: {}", e);
+                                        }
+                                        return;
                                     }
                                 }
                             }
@@ -176,7 +197,8 @@ impl Service for WhatsAppService {
                                     is_own,
                                 };
 
-                                if let Err(e) = tx.send(ServiceEvent::NewMessage(service_msg)).await {
+                                if let Err(e) = tx.send(ServiceEvent::NewMessage(service_msg)).await
+                                {
                                     error!("Failed to send internal message: {}", e);
                                 }
                             }
@@ -204,14 +226,19 @@ impl Service for WhatsAppService {
         });
 
         if let Some(display_name) = &self.config.display_name {
-            info!("[WhatsApp:{}] Setting display name to: {}", self.name, display_name);
+            info!(
+                "[WhatsApp:{}] Setting display name to: {}",
+                self.name, display_name
+            );
         }
 
         Ok(())
     }
 
     async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
-        let client = self.client.as_ref()
+        let client = self
+            .client
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("WhatsApp client not connected"))?;
 
         let jid = Jid::from_str(channel)?;
@@ -244,10 +271,7 @@ impl Service for WhatsAppService {
                 wa_rs_core::download::MediaType::Document
             };
 
-            let upload = client.upload(
-                attachment.data.clone(),
-                media_type
-            ).await?;
+            let upload = client.upload(attachment.data.clone(), media_type).await?;
 
             let wa_message = if is_image {
                 wa::Message {
@@ -259,12 +283,16 @@ impl Service for WhatsAppService {
                         file_enc_sha256: Some(upload.file_enc_sha256),
                         file_sha256: Some(upload.file_sha256),
                         file_length: Some(attachment.data.len() as u64),
-                        caption: Some(match (message.sender.is_empty(), message.content.is_empty()) {
-                            (true, true) => "".to_string(),
-                            (true, false) => message.content.clone(),
-                            (false, true) => format!("*{}*", message.sender),
-                            (false, false) => format!("*{}*: {}", message.sender, message.content),
-                        }),
+                        caption: Some(
+                            match (message.sender.is_empty(), message.content.is_empty()) {
+                                (true, true) => "".to_string(),
+                                (true, false) => message.content.clone(),
+                                (false, true) => format!("*{}*", message.sender),
+                                (false, false) => {
+                                    format!("*{}*: {}", message.sender, message.content)
+                                }
+                            },
+                        ),
                         ..Default::default()
                     })),
                     ..Default::default()
@@ -292,39 +320,53 @@ impl Service for WhatsAppService {
         }
 
         if self.config.debug {
-            info!("[WhatsApp DEBUG] Successfully sent message(s) to {}", channel);
+            info!(
+                "[WhatsApp DEBUG] Successfully sent message(s) to {}",
+                channel
+            );
         }
 
         Ok(last_id)
     }
 
-    async fn edit_message(&self, _channel: &str, _message_id: &str, _new_content: &str) -> Result<()> {
+    async fn edit_message(
+        &self,
+        _channel: &str,
+        _message_id: &str,
+        _new_content: &str,
+    ) -> Result<()> {
         Ok(())
     }
 
     async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
-         let client = self.client.as_ref()
+        let client = self
+            .client
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("WhatsApp client not connected"))?;
 
-         let jid = Jid::from_str(channel)?;
+        let jid = Jid::from_str(channel)?;
 
-         let wa_message = wa::Message {
-             reaction_message: Some(wa::message::ReactionMessage {
-                 key: Some(MessageKey {
-                     remote_jid: Some(channel.to_string()),
-                     from_me: Some(true),
-                     id: Some(message_id.to_string()),
-                     ..Default::default()
-                 }),
-                 text: Some(emoji.to_string()),
-                 sender_timestamp_ms: Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as i64),
-                 ..Default::default()
-             }),
-             ..Default::default()
-         };
+        let wa_message = wa::Message {
+            reaction_message: Some(wa::message::ReactionMessage {
+                key: Some(MessageKey {
+                    remote_jid: Some(channel.to_string()),
+                    from_me: Some(true),
+                    id: Some(message_id.to_string()),
+                    ..Default::default()
+                }),
+                text: Some(emoji.to_string()),
+                sender_timestamp_ms: Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?
+                        .as_millis() as i64,
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
 
-         client.send_message(jid, wa_message).await?;
-         Ok(())
+        client.send_message(jid, wa_message).await?;
+        Ok(())
     }
 
     fn service_name(&self) -> &str {
@@ -341,11 +383,22 @@ impl Service for WhatsAppService {
     }
 
     async fn wait_until_ready(&self) -> Result<()> {
-        info!("[WhatsApp:{}] Waiting for connection to stabilize...", self.name);
+        info!(
+            "[WhatsApp:{}] Waiting for connection to stabilize...",
+            self.name
+        );
         if self.client.is_some() {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             info!("[WhatsApp:{}] Ready!", self.name);
         }
         Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

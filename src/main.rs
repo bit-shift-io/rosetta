@@ -7,12 +7,14 @@ use tokio::sync::Mutex;
 
 mod bridge;
 mod config;
+mod gif;
 mod persistence;
 mod services;
 
-use bridge::BridgeCoordinator;
-use config::{Config, ServiceConfig};
-use services::{
+use crate::bridge::BridgeCoordinator;
+use crate::config::{Config, GifProviderConfig, ServiceConfig};
+use crate::gif::GifResolver;
+use crate::services::{
     Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
 };
 
@@ -44,6 +46,16 @@ async fn main() -> Result<()> {
     // Load configuration
     let config = Config::load("data/config.yaml")?;
 
+    let gif_resolver = Arc::new(GifResolver::new(
+        &config.gif_providers,
+        config.media_whitelist.clone(),
+        config
+            .services
+            .values()
+            .any(|s| matches!(s, ServiceConfig::Discord(cfg) if cfg.debug)),
+        None, // Will be set after Matrix connects
+    ));
+
     info!(
         "Loaded configuration with {} services and {} bridges",
         config.services.len(),
@@ -74,7 +86,7 @@ async fn main() -> Result<()> {
             ServiceConfig::Discord(cfg) => Box::new(DiscordService::new(
                 service_name.clone(),
                 cfg.clone(),
-                config.media_whitelist.clone(),
+                gif_resolver.clone(),
             )),
         };
 
@@ -92,6 +104,14 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     return Err(e);
+                }
+            }
+
+            // If this is a Matrix service, get the max upload size and set it on the GifResolver
+            if let Some(matrix_svc) = svc.as_any().downcast_ref::<MatrixService>() {
+                if let Some(max_size) = matrix_svc.max_upload_size() {
+                    gif_resolver.set_max_upload_size(max_size).await;
+                    info!("Set max upload size on GifResolver: {} bytes", max_size);
                 }
             }
         }

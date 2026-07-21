@@ -9,6 +9,7 @@ use matrix_sdk::{
     config::SyncSettings,
     ruma::{
         OwnedEventId, RoomId,
+        api::client::media::get_media_config::v3::Request as GetMediaConfigRequest,
         events::reaction::OriginalSyncReactionEvent,
         events::room::message::{
             MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
@@ -16,6 +17,7 @@ use matrix_sdk::{
         },
     },
 };
+use std::any::Any;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -25,6 +27,7 @@ pub struct MatrixService {
     config: MatrixServiceConfig,
     client: Option<MatrixClient>,
     start_time: std::time::SystemTime,
+    max_upload_size: Option<u64>,
 }
 
 impl MatrixService {
@@ -34,12 +37,17 @@ impl MatrixService {
             config,
             client: None,
             start_time: std::time::SystemTime::now(),
+            max_upload_size: None,
         }
     }
 
     #[allow(dead_code)]
     pub fn client(&self) -> Option<&MatrixClient> {
         self.client.as_ref()
+    }
+
+    pub fn max_upload_size(&self) -> Option<u64> {
+        self.max_upload_size
     }
 }
 
@@ -62,6 +70,24 @@ impl Service for MatrixService {
             self.name,
             client.user_id().unwrap()
         );
+
+        // Fetch max upload size from server capabilities
+        let request = GetMediaConfigRequest::new();
+        match client.send(request).await {
+            Ok(response) => {
+                let max_bytes: u64 = response.upload_size.into();
+                self.max_upload_size = Some(max_bytes);
+                info!(
+                    "[Matrix:{}] Max upload size: {} bytes ({:.1} MB)",
+                    self.name,
+                    max_bytes,
+                    max_bytes as f64 / 1_048_576.0
+                );
+            }
+            Err(e) => {
+                warn!("[Matrix:{}] Failed to fetch media config: {}", self.name, e);
+            }
+        }
 
         // Set display name if configured
         if let Some(display_name) = &self.config.display_name {
@@ -516,5 +542,13 @@ impl Service for MatrixService {
             self.name
         );
         Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

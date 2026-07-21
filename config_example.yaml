@@ -7,6 +7,18 @@ media_whitelist:
   - "imgur.com"
   - "klipy.com"
 
+# GIF API Providers (optional - fallback to scraping if not configured)
+# Get API keys from:
+#   Tenor: Google Cloud Console -> Enable Tenor API -> Create API key
+#   Giphy: https://developers.giphy.com/dashboard/ -> Create App -> API Key
+#   Klipy: https://docs.klipy.com/ -> Create API key (compatible with Tenor API)
+#   Imgur: https://api.imgur.com/ -> Register application -> Client ID
+gif_providers:
+  tenor_api_key: ""  # Optional: "YOUR_TENOR_API_KEY"
+  giphy_api_key: ""  # Optional: "YOUR_GIPHY_API_KEY"
+  klipy_api_key: ""  # Optional: "YOUR_KLIPY_API_KEY"
+  imgur_client_id: ""  # Optional: "YOUR_IMGUR_CLIENT_ID"
+
 # services have a name, and their connection settings
 # you may have multiple services of the same protocol
 services:

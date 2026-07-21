@@ -12,14 +12,17 @@ log = "0.4"
 matrix-sdk = "0.18.0"
 mime = "0.3"
 serenity = "0.12.4"
-reqwest = "0.11"
+reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1.48.0", features = ["full"] }
 qr2term = "0.3.3"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9.34"
 regex = "1.12.2"
+urlencoding = "2.1"
 pulldown-cmark = "0.13.0"
 rusqlite = "0.37"
+url = "2.5"
 
 wa-rs = "0.2"
 wa-rs-core = "0.2"

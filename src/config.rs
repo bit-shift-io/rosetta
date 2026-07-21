@@ -1,7 +1,7 @@
+use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use anyhow::Result;
 
 /// Main configuration structure
 #[derive(Debug, Deserialize, Clone)]
@@ -13,6 +13,26 @@ pub struct Config {
     /// Global media scraping whitelist
     #[serde(default)]
     pub media_whitelist: Vec<String>,
+    /// GIF provider API keys (optional - fallback to scraping if not provided)
+    #[serde(default)]
+    pub gif_providers: GifProviderConfig,
+}
+
+/// GIF provider API configuration
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct GifProviderConfig {
+    /// Tenor API key (from Google Cloud Console with Tenor API enabled)
+    #[serde(default)]
+    pub tenor_api_key: Option<String>,
+    /// Giphy API key (from developers.giphy.com)
+    #[serde(default)]
+    pub giphy_api_key: Option<String>,
+    /// Klipy API key (from docs.klipy.com - compatible with Tenor API format)
+    #[serde(default)]
+    pub klipy_api_key: Option<String>,
+    /// Imgur Client ID (from api.imgur.com)
+    #[serde(default)]
+    pub imgur_client_id: Option<String>,
 }
 
 /// Service configuration - tagged by protocol type
@@ -34,7 +54,6 @@ pub struct MatrixServiceConfig {
     #[allow(dead_code)]
     pub device_id: Option<String>,
     #[serde(default)]
-
     pub debug: bool,
     #[serde(default)]
     pub display_name: Option<String>,
@@ -92,7 +111,7 @@ impl Config {
         let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)
     }
-    
+
     /// Get a service configuration by name
     #[allow(dead_code)]
     pub fn get_service(&self, name: &str) -> Option<&ServiceConfig> {

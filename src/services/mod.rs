@@ -1,5 +1,6 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
+use std::any::Any;
 use tokio::sync::mpsc;
 
 /// Represents a file attachment (image, video, etc.)
@@ -32,9 +33,9 @@ pub struct ServiceMessage {
 }
 
 // Re-export service implementations
+pub mod discord;
 pub mod matrix;
 pub mod whatsapp;
-pub mod discord;
 
 /// Represents an update to an existing message (edit)
 #[derive(Debug, Clone)]
@@ -69,14 +70,14 @@ pub enum ServiceEvent {
 
 /// Trait that all chat service implementations must implement
 #[async_trait]
-pub trait Service: Send + Sync {
+pub trait Service: Send + Sync + Any {
     /// Connect to the service and authenticate
     async fn connect(&mut self) -> Result<()>;
-    
+
     /// Start listening for incoming messages
     /// Returns a receiver channel for events from this service
     async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()>;
-    
+
     /// Send a message to a specific channel on this service
     /// Returns the ID of the sent message (for tracking)
     async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String>;
@@ -86,22 +87,22 @@ pub trait Service: Send + Sync {
 
     /// React to a message
     async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()>;
-    
+
     /// Get the service name
     #[allow(dead_code)]
     fn service_name(&self) -> &str;
-    
+
     /// Check if the service is currently connected
     fn is_connected(&self) -> bool {
         true
     }
-    
+
     /// Get list of members in a channel/room (names)
     /// Returns empty list if not supported or failed
     async fn get_room_members(&self, _channel: &str) -> Result<Vec<String>> {
         Ok(vec![])
     }
-    
+
     /// Disconnect from the service
     #[allow(dead_code)]
     async fn disconnect(&mut self) -> Result<()>;
@@ -111,4 +112,8 @@ pub trait Service: Send + Sync {
     async fn wait_until_ready(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Get the underlying Any for downcasting
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
