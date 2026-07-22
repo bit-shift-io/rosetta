@@ -82,6 +82,10 @@ impl GifProvider for TenorProvider {
         domain.contains("tenor.com") || domain.contains("tenor.co")
     }
 
+    fn set_max_upload_size(&mut self, _max_bytes: u64) {
+        // Tenor doesn't currently support size filtering
+    }
+
     async fn resolve(&self, url: &str) -> Result<Option<ResolvedGif>> {
         if !self.is_tenor_url(url) {
             return Ok(None);

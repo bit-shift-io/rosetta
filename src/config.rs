@@ -10,29 +10,35 @@ pub struct Config {
     pub services: HashMap<String, ServiceConfig>,
     /// Map of bridge name to bridge configuration
     pub bridges: HashMap<String, Vec<ChannelConfig>>,
-    /// Global media scraping whitelist
+    /// Global media configuration
     #[serde(default)]
-    pub media_whitelist: Vec<String>,
-    /// GIF provider API keys (optional - fallback to scraping if not provided)
-    #[serde(default)]
-    pub gif_providers: GifProviderConfig,
+    pub media: Option<MediaConfig>,
 }
 
-/// GIF provider API configuration
+/// Media configuration for GIF providers and size limits
 #[derive(Debug, Deserialize, Clone, Default)]
-pub struct GifProviderConfig {
-    /// Tenor API key (from Google Cloud Console with Tenor API enabled)
+pub struct MediaConfig {
+    /// Maximum media upload size in megabytes
     #[serde(default)]
-    pub tenor_api_key: Option<String>,
-    /// Giphy API key (from developers.giphy.com)
+    pub max_size_mb: u64,
+    /// Map of provider name to provider configuration
     #[serde(default)]
-    pub giphy_api_key: Option<String>,
-    /// Klipy API key (from docs.klipy.com - compatible with Tenor API format)
+    pub gif_providers: HashMap<String, GifProviderEntry>,
+}
+
+/// Single GIF provider configuration entry
+#[derive(Debug, Deserialize, Clone)]
+pub struct GifProviderEntry {
+    /// Whether this provider is enabled
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    /// API key for the provider
     #[serde(default)]
-    pub klipy_api_key: Option<String>,
-    /// Imgur Client ID (from api.imgur.com)
-    #[serde(default)]
-    pub imgur_client_id: Option<String>,
+    pub api_key: String,
+}
+
+fn default_false() -> bool {
+    false
 }
 
 /// Service configuration - tagged by protocol type

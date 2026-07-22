@@ -12,7 +12,7 @@ mod persistence;
 mod services;
 
 use crate::bridge::BridgeCoordinator;
-use crate::config::{Config, GifProviderConfig, ServiceConfig};
+use crate::config::{Config, ServiceConfig};
 use crate::gif::GifResolver;
 use crate::services::{
     Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
     builder.filter_module("matrix_sdk", log::LevelFilter::Warn);
     builder.filter_module("matrix_sdk_crypto", log::LevelFilter::Error);
     builder.filter_module("ruma", log::LevelFilter::Warn);
+    builder.filter_module("ruma_common::api::path_builder", log::LevelFilter::Error);
     builder.filter_module("tracing", log::LevelFilter::Warn);
     builder.filter_module("serenity", log::LevelFilter::Warn);
     builder.filter_module("h2", log::LevelFilter::Warn);
@@ -47,8 +48,7 @@ async fn main() -> Result<()> {
     let config = Config::load("data/config.yaml")?;
 
     let gif_resolver = Arc::new(GifResolver::new(
-        &config.gif_providers,
-        config.media_whitelist.clone(),
+        &config.media,
         config
             .services
             .values()
@@ -111,7 +111,6 @@ async fn main() -> Result<()> {
             if let Some(matrix_svc) = svc.as_any().downcast_ref::<MatrixService>() {
                 if let Some(max_size) = matrix_svc.max_upload_size() {
                     gif_resolver.set_max_upload_size(max_size).await;
-                    info!("Set max upload size on GifResolver: {} bytes", max_size);
                 }
             }
         }

@@ -211,7 +211,7 @@ impl KlipyProvider {
         }))
     }
 
-fn extract_media_from_klipy_item(&self, item: KlipyItem) -> Result<Option<ResolvedGif>> {
+    fn extract_media_from_klipy_item(&self, item: KlipyItem) -> Result<Option<ResolvedGif>> {
         // Define size tiers from smallest to largest to prefer smaller files
         let size_tiers = ["xs", "sm", "md", "hd"];
 
@@ -409,11 +409,6 @@ impl GifProvider for KlipyProvider {
 
     fn set_max_upload_size(&mut self, max_bytes: u64) {
         self.max_upload_size = Some(max_bytes);
-        info!(
-            "[Klipy] Max upload size set to {} bytes ({:.1} MB)",
-            max_bytes,
-            max_bytes as f64 / 1_048_576.0
-        );
     }
 
     async fn resolve(&self, url: &str) -> Result<Option<ResolvedGif>> {

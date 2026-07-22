@@ -103,6 +103,10 @@ impl GifProvider for GiphyProvider {
             || domain.contains("media.giphy.com")
     }
 
+    fn set_max_upload_size(&mut self, _max_bytes: u64) {
+        // Giphy doesn't currently support size filtering
+    }
+
     async fn resolve(&self, url: &str) -> Result<Option<ResolvedGif>> {
         if !self.is_giphy_url(url) {
             return Ok(None);

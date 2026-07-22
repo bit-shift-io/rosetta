@@ -1,106 +1,130 @@
 use anyhow::Result;
 use log::{debug, info, warn};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use url::Url;
 
-use crate::config::GifProviderConfig;
+use crate::config::MediaConfig;
 use crate::gif::providers::{
     FallbackScraper, GiphyProvider, ImgurProvider, KlipyProvider, TenorProvider,
 };
 use crate::gif::providers::{GifProvider, ResolvedGif};
 
 /// Main GIF resolver that chains providers
-/// Tries providers in order: Tenor API -> Giphy API -> Fallback Scraper
+/// Tries providers in order: Tenor API -> Giphy API -> Klipy API -> Imgur API -> Fallback Scraper
 pub struct GifResolver {
     providers: Arc<Mutex<Vec<Box<dyn GifProvider>>>>,
     fallback: Option<FallbackScraper>,
     debug: bool,
     max_upload_size: Mutex<Option<u64>>,
+    config_max_size_mb: Option<u64>,
 }
 
 impl GifResolver {
-    /// Create a new GifResolver from config
+    /// Create a new GifResolver from MediaConfig
     pub fn new(
-        config: &GifProviderConfig,
-        media_whitelist: Vec<String>,
+        media_config: &Option<MediaConfig>,
         debug: bool,
         max_upload_size: Option<u64>,
     ) -> Self {
         let mut providers: Vec<Box<dyn GifProvider>> = Vec::new();
+        let mut fallback_domains: HashSet<String> = HashSet::new();
 
-        // Add Tenor provider if API key configured
-        if let Some(api_key) = &config.tenor_api_key {
-            if !api_key.is_empty() {
-                match TenorProvider::new(api_key.clone(), None) {
-                    Ok(p) => {
-                        log::info!("[GifResolver] Tenor provider enabled");
-                        providers.push(Box::new(p));
-                    }
-                    Err(e) => log::warn!("[GifResolver] Failed to create Tenor provider: {}", e),
+        // Get the initial max upload size (from config or passed directly)
+        let initial_max_size =
+            max_upload_size.or_else(|| media_config.as_ref().map(|m| m.max_size_mb * 1_048_576));
+
+        // Store config max_size_mb for override logging
+        let config_max_size_mb = media_config
+            .as_ref()
+            .map(|m| m.max_size_mb)
+            .filter(|&s| s > 0);
+
+        if let Some(media_config) = media_config {
+            // Iterate over enabled providers
+            for (name, entry) in &media_config.gif_providers {
+                if !entry.enabled {
+                    debug!("[GifResolver] Provider '{}' is disabled, skipping", name);
+                    continue;
                 }
-            }
-        } else {
-            log::debug!("[GifResolver] Tenor API key not configured");
-        }
 
-        // Add Giphy provider if API key configured
-        if let Some(api_key) = &config.giphy_api_key {
-            if !api_key.is_empty() {
-                match GiphyProvider::new(api_key.clone()) {
-                    Ok(p) => {
-                        log::info!("[GifResolver] Giphy provider enabled");
-                        providers.push(Box::new(p));
-                    }
-                    Err(e) => log::warn!("[GifResolver] Failed to create Giphy provider: {}", e),
+                if entry.api_key.is_empty() {
+                    debug!(
+                        "[GifResolver] Provider '{}' has empty API key, skipping",
+                        name
+                    );
+                    continue;
                 }
-            }
-        } else {
-            log::debug!("[GifResolver] Giphy API key not configured");
-        }
 
-        // Add Klipy provider if API key configured
-        if let Some(api_key) = &config.klipy_api_key {
-            if !api_key.is_empty() {
-                match KlipyProvider::new(api_key.clone()) {
-                    Ok(mut p) => {
-                        if let Some(max_size) = max_upload_size {
-                            p.set_max_upload_size(max_size);
+                match name.as_str() {
+                    "tenor" => match TenorProvider::new(entry.api_key.clone(), None) {
+                        Ok(mut p) => {
+                            if let Some(max_size) = initial_max_size {
+                                p.set_max_upload_size(max_size);
+                            }
+                            info!("[GifResolver] Tenor provider enabled");
+                            providers.push(Box::new(p));
+                            fallback_domains.insert("tenor.com".to_string());
+                            fallback_domains.insert("tenor.co".to_string());
                         }
-                        log::info!("[GifResolver] Klipy provider enabled");
-                        providers.push(Box::new(p));
+                        Err(e) => warn!("[GifResolver] Failed to create Tenor provider: {}", e),
+                    },
+                    "giphy" => match GiphyProvider::new(entry.api_key.clone()) {
+                        Ok(mut p) => {
+                            if let Some(max_size) = initial_max_size {
+                                p.set_max_upload_size(max_size);
+                            }
+                            info!("[GifResolver] Giphy provider enabled");
+                            providers.push(Box::new(p));
+                            fallback_domains.insert("giphy.com".to_string());
+                            fallback_domains.insert("gph.is".to_string());
+                            fallback_domains.insert("media.giphy.com".to_string());
+                        }
+                        Err(e) => warn!("[GifResolver] Failed to create Giphy provider: {}", e),
+                    },
+                    "klipy" => match KlipyProvider::new(entry.api_key.clone()) {
+                        Ok(mut p) => {
+                            if let Some(max_size) = initial_max_size {
+                                p.set_max_upload_size(max_size);
+                            }
+                            info!("[GifResolver] Klipy provider enabled");
+                            providers.push(Box::new(p));
+                            fallback_domains.insert("klipy.com".to_string());
+                        }
+                        Err(e) => warn!("[GifResolver] Failed to create Klipy provider: {}", e),
+                    },
+                    "imgur" => match ImgurProvider::new(entry.api_key.clone()) {
+                        Ok(mut p) => {
+                            if let Some(max_size) = initial_max_size {
+                                p.set_max_upload_size(max_size);
+                            }
+                            info!("[GifResolver] Imgur provider enabled");
+                            providers.push(Box::new(p));
+                            fallback_domains.insert("imgur.com".to_string());
+                            fallback_domains.insert("i.imgur.com".to_string());
+                        }
+                        Err(e) => warn!("[GifResolver] Failed to create Imgur provider: {}", e),
+                    },
+                    unknown => {
+                        warn!("[GifResolver] Unknown provider '{}', skipping", unknown);
                     }
-                    Err(e) => log::warn!("[GifResolver] Failed to create Klipy provider: {}", e),
                 }
             }
         } else {
-            log::debug!("[GifResolver] Klipy API key not configured");
+            debug!("[GifResolver] No media config provided");
         }
 
-        // Add Imgur provider if API key configured
-        if let Some(api_key) = &config.imgur_client_id {
-            if !api_key.is_empty() {
-                match ImgurProvider::new(api_key.clone()) {
-                    Ok(p) => {
-                        log::info!("[GifResolver] Imgur provider enabled");
-                        providers.push(Box::new(p));
-                    }
-                    Err(e) => log::warn!("[GifResolver] Failed to create Imgur provider: {}", e),
-                }
-            }
-        } else {
-            log::debug!("[GifResolver] Imgur client ID not configured");
-        }
-
-        // Always add fallback scraper if whitelist is not empty
-        let fallback = if !media_whitelist.is_empty() {
-            log::info!(
+        // Always add fallback scraper if we have any domains
+        let fallback = if !fallback_domains.is_empty() {
+            let whitelist: Vec<String> = fallback_domains.into_iter().collect();
+            info!(
                 "[GifResolver] Fallback scraper enabled for domains: {:?}",
-                media_whitelist
+                whitelist
             );
-            Some(FallbackScraper::new(media_whitelist))
+            Some(FallbackScraper::new(whitelist))
         } else {
-            log::debug!("[GifResolver] Fallback scraper disabled (no whitelist)");
+            debug!("[GifResolver] Fallback scraper disabled (no provider domains)");
             None
         };
 
@@ -108,29 +132,31 @@ impl GifResolver {
             providers: Arc::new(Mutex::new(providers)),
             fallback,
             debug,
-            max_upload_size: Mutex::new(max_upload_size),
+            max_upload_size: Mutex::new(initial_max_size),
+            config_max_size_mb,
         }
     }
 
     /// Set the maximum upload size (from Matrix homeserver config)
     pub async fn set_max_upload_size(&self, max_bytes: u64) {
-        info!(
-            "[GifResolver] set_max_upload_size called with {} bytes ({:.1} MB)",
-            max_bytes,
-            max_bytes as f64 / 1_048_576.0
-        );
+        let max_mb = max_bytes as f64 / 1_048_576.0;
+
+        // Log if config's max_size_mb is being overridden by homeserver value
+        if let Some(config_mb) = self.config_max_size_mb {
+            let config_bytes = config_mb * 1_048_576;
+            if max_bytes != config_bytes {
+                info!(
+                    "[GifResolver] Config max_size_mb ({} MB = {} bytes) overridden by homeserver value ({} bytes = {:.1} MB)",
+                    config_mb, config_bytes, max_bytes, max_mb
+                );
+            }
+        }
+
         *self.max_upload_size.lock().await = Some(max_bytes);
         let mut providers = self.providers.lock().await;
-        info!("[GifResolver] Propagating to {} providers", providers.len());
         for provider in providers.iter_mut() {
-            info!("[GifResolver] Calling set_max_upload_size on provider: {}", provider.name());
             provider.set_max_upload_size(max_bytes);
         }
-        info!(
-            "[GifResolver] Max upload size set to {} bytes ({:.1} MB)",
-            max_bytes,
-            max_bytes as f64 / 1_048_576.0
-        );
     }
 
     /// Resolve a URL to direct media using available providers
@@ -167,7 +193,7 @@ impl GifResolver {
                         );
                     }
                     Err(e) => {
-                        log::warn!(
+                        warn!(
                             "[GifResolver] Provider '{}' error for {}: {}",
                             provider.name(),
                             url,
@@ -186,28 +212,27 @@ impl GifResolver {
                 match fallback.resolve(url).await {
                     Ok(Some(result)) => {
                         if self.debug {
-                            log::info!(
+                            info!(
                                 "[GifResolver] Resolved via fallback: {} -> {}",
-                                url,
-                                result.url
+                                url, result.url
                             );
                         }
                         return Ok(Some(result));
                     }
                     Ok(None) => {
                         if self.debug {
-                            log::debug!("[GifResolver] Fallback could not resolve {}", url);
+                            debug!("[GifResolver] Fallback could not resolve {}", url);
                         }
                     }
                     Err(e) => {
-                        log::warn!("[GifResolver] Fallback error for {}: {}", url, e);
+                        warn!("[GifResolver] Fallback error for {}: {}", url, e);
                     }
                 }
             }
         }
 
         if self.debug {
-            log::debug!("[GifResolver] No provider could resolve: {}", url);
+            debug!("[GifResolver] No provider could resolve: {}", url);
         }
         Ok(None)
     }

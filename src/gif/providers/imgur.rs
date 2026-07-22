@@ -95,6 +95,10 @@ impl GifProvider for ImgurProvider {
         domain.contains("imgur.com")
     }
 
+    fn set_max_upload_size(&mut self, _max_bytes: u64) {
+        // Imgur doesn't currently support size filtering
+    }
+
     async fn resolve(&self, url: &str) -> Result<Option<ResolvedGif>> {
         if !self.is_imgur_url(url) {
             return Ok(None);
