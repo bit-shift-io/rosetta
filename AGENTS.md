@@ -20,7 +20,7 @@ To minimize API rate limits and token usage during automated agent loops, adhere
 ## 📁 Project Knowledge & Resources
 
 * **Agent Skills (`.agents/skills/`):** Contains specialized agent skills and reusable tool/workflow instructions. Check this folder when performing specific automated tasks.
-* **Feature Roadmap (`.sketch/`):** Contains feature specifications, architecture drafts, and planned roadmap items. Consult this directory before implementing or proposing major structural updates.
+* **Feature Roadmap (`.scratch/`):** Contains feature specifications, architecture drafts, and planned roadmap items. Consult this directory before implementing or proposing major structural updates.
 
 ---
 

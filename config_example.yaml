@@ -4,7 +4,7 @@ media:
   gif_providers:
     klipy:
       enabled: true
-      api_key: "t24UsDzXKkEWDraVJ5D8CjrNcVaZ7BPaWfyj8lgcUE9XXgxHZZiTUosH0oy1mALe"
+      api_key: ""
     giphy:
       enabled: true
       api_key: ""
