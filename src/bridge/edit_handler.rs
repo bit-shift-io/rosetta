@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::persistence::MessageStore;
-use crate::services::{Service, ServiceUpdate};
+use crate::services::ServiceUpdate;
+use crate::services::traits::{MandatoryService, OptionalEditor};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ impl EditHandler {
     pub async fn handle(
         &self,
         update: ServiceUpdate,
-        services: &HashMap<String, Arc<Mutex<Box<dyn Service>>>>,
+        services: &HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>>,
         config: &Config,
         store: &MessageStore,
     ) -> Result<()> {
@@ -61,7 +62,7 @@ impl EditHandler {
             Ok(mappings) => {
                 for (dest_service, dest_channel, dest_id) in mappings {
                     if let Some(service_lock) = services.get(&dest_service) {
-                        let mut service = service_lock.lock().await;
+                        let service = service_lock.lock().await;
 
                         log::info!(
                             "[EditHandler] Forwarding edit to {}:{}",
@@ -69,18 +70,28 @@ impl EditHandler {
                             dest_channel
                         );
 
-                        if let Err(e) = service
-                            .edit_message(&dest_channel, &dest_id, &update.new_content)
-                            .await
+                        // Downcast to MessageEditor for edit_message
+                        if let Some(editor) =
+                            service.as_any().downcast_ref::<Box<dyn OptionalEditor>>()
                         {
-                            log::error!(
-                                "Failed to edit message in {}:{}: {}",
-                                dest_service,
-                                dest_channel,
-                                e
-                            );
+                            if let Err(e) = editor
+                                .edit_message(&dest_channel, &dest_id, &update.new_content)
+                                .await
+                            {
+                                log::error!(
+                                    "Failed to edit message in {}:{}: {}",
+                                    dest_service,
+                                    dest_channel,
+                                    e
+                                );
+                            } else {
+                                log::info!("Edited message in {}:{}", dest_service, dest_channel);
+                            }
                         } else {
-                            log::info!("Edited message in {}:{}", dest_service, dest_channel);
+                            log::warn!(
+                                "[EditHandler] Service '{}' does not support message editing",
+                                dest_service
+                            );
                         }
                     }
                 }

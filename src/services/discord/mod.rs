@@ -16,7 +16,6 @@ use serenity::{
     async_trait as serenity_async_trait,
     client::{Client, Context, EventHandler},
     model::{channel::Message, gateway::Ready, id::ChannelId},
-    prelude::*,
 };
 use std::any::Any;
 use std::sync::Arc;

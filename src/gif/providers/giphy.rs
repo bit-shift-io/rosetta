@@ -52,12 +52,14 @@ struct GiphyResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GiphyGif {
     id: String,
     images: GiphyImages,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GiphyImages {
     original: GiphyImage,
     #[serde(rename = "original_mp4")]
@@ -66,7 +68,6 @@ struct GiphyImages {
     preview_mp4: Option<GiphyImage>,
     #[serde(rename = "preview_gif")]
     preview_gif: Option<GiphyImage>,
-    #[allow(dead_code)]
     downsized: Option<GiphyImage>,
 }
 

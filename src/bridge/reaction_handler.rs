@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::persistence::MessageStore;
-use crate::services::{Service, ServiceReaction};
+use crate::services::ServiceReaction;
+use crate::services::traits::MandatoryService;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ impl ReactionHandler {
     pub async fn handle(
         &self,
         reaction: ServiceReaction,
-        services: &HashMap<String, Arc<Mutex<Box<dyn Service>>>>,
+        services: &HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>>,
         config: &Config,
         store: &MessageStore,
     ) -> Result<()> {

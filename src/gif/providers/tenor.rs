@@ -52,23 +52,21 @@ struct TenorResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TenorPost {
     id: String,
     media_formats: std::collections::HashMap<String, TenorMediaFormat>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TenorMediaFormat {
     url: String,
     #[serde(rename = "type")]
     media_type: String,
-    #[allow(dead_code)]
     duration: Option<f64>,
-    #[allow(dead_code)]
     preview: Option<String>,
-    #[allow(dead_code)]
     dims: Option<Vec<u32>>,
-    #[allow(dead_code)]
     size: Option<u64>,
 }
 

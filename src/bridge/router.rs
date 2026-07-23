@@ -4,11 +4,12 @@ use crate::bridge::reaction_handler::ReactionHandler;
 use crate::bridge::status_handler::StatusHandler;
 use crate::config::Config;
 use crate::persistence::MessageStore;
-use crate::services::{Service, ServiceEvent};
+use crate::services::ServiceEvent;
+use crate::services::traits::MandatoryService;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 
 /// Central event router that receives ServiceEvents and delegates to appropriate handlers
 pub struct EventRouter {
@@ -37,7 +38,7 @@ impl EventRouter {
     pub async fn route(
         &self,
         event: ServiceEvent,
-        services: &HashMap<String, Arc<Mutex<Box<dyn Service>>>>,
+        services: &HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>>,
         config: &Config,
         store: &MessageStore,
     ) -> Result<()> {
@@ -76,12 +77,13 @@ mod tests {
     use crate::bridge::media::MediaHandler;
     use crate::bridge::reaction_handler::ReactionHandler;
     use crate::bridge::status_handler::StatusHandler;
-    use crate::config::{ChannelConfig, Config, ServiceConfig};
+    use crate::config::{ChannelConfig, Config};
     use crate::persistence::MessageStore;
     use crate::services::traits::{
-        Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+        Connectable, MandatoryService, MemberLister, MessageEditor, MessageSender, ReactionSender,
+        ServiceInfo,
     };
-    use crate::services::{Service, ServiceEvent, ServiceMessage, ServiceReaction, ServiceUpdate};
+    use crate::services::{ServiceEvent, ServiceMessage, ServiceReaction, ServiceUpdate};
     use anyhow::Result;
     use async_trait::async_trait;
     use std::any::Any;
@@ -201,18 +203,18 @@ mod tests {
         }
     }
 
-    fn make_services() -> HashMap<String, Arc<Mutex<Box<dyn Service>>>> {
+    fn make_services() -> HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>> {
         let mut services = HashMap::new();
         services.insert(
             "matrix".to_string(),
             Arc::new(Mutex::new(
-                Box::new(MockService::new("matrix")) as Box<dyn Service>
+                Box::new(MockService::new("matrix")) as Box<dyn MandatoryService>
             )),
         );
         services.insert(
             "discord".to_string(),
             Arc::new(Mutex::new(
-                Box::new(MockService::new("discord")) as Box<dyn Service>
+                Box::new(MockService::new("discord")) as Box<dyn MandatoryService>
             )),
         );
         services

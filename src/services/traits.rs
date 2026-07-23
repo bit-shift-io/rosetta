@@ -76,6 +76,58 @@ impl<T> MandatoryService for T where
 {
 }
 
+// Implement subtraits for Box<dyn MandatoryService>
+#[async_trait]
+impl Connectable for Box<dyn MandatoryService> {
+    async fn connect(&mut self) -> Result<()> {
+        (**self).connect().await
+    }
+
+    async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
+        (**self).start(tx).await
+    }
+
+    fn is_connected(&self) -> bool {
+        (**self).is_connected()
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        (**self).wait_until_ready().await
+    }
+
+    async fn disconnect(&mut self) -> Result<()> {
+        (**self).disconnect().await
+    }
+}
+
+#[async_trait]
+impl MessageSender for Box<dyn MandatoryService> {
+    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
+        (**self).send_message(channel, message).await
+    }
+}
+
+#[async_trait]
+impl ReactionSender for Box<dyn MandatoryService> {
+    async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
+        (**self).react_to_message(channel, message_id, emoji).await
+    }
+}
+
+impl ServiceInfo for Box<dyn MandatoryService> {
+    fn service_name(&self) -> &str {
+        (**self).service_name()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        (**self).as_any()
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        (**self).as_any_mut()
+    }
+}
+
 /// Alias for optional editor capability
 pub trait OptionalEditor: MessageEditor + Send + Sync + Any {}
 
@@ -87,3 +139,27 @@ pub trait OptionalMembers: MemberLister + Send + Sync + Any {}
 
 // Blanket implementation for types implementing members capability
 impl<T> OptionalMembers for T where T: MemberLister + Send + Sync + Any {}
+
+// Implement OptionalEditor for Box<dyn MandatoryService>
+#[async_trait]
+impl MessageEditor for Box<dyn MandatoryService> {
+    async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()> {
+        if let Some(editor) = self.as_any().downcast_ref::<Box<dyn OptionalEditor>>() {
+            editor.edit_message(channel, message_id, new_content).await
+        } else {
+            Err(anyhow::anyhow!("Service does not support message editing"))
+        }
+    }
+}
+
+// Implement OptionalMembers for Box<dyn MandatoryService>
+#[async_trait]
+impl MemberLister for Box<dyn MandatoryService> {
+    async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
+        if let Some(member_lister) = self.as_any().downcast_ref::<Box<dyn OptionalMembers>>() {
+            member_lister.get_room_members(channel).await
+        } else {
+            Ok(vec![])
+        }
+    }
+}

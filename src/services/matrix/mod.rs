@@ -16,7 +16,7 @@ use matrix_sdk::{
     config::SyncSettings,
     ruma::{
         OwnedEventId, RoomId,
-        api::client::media::get_media_config::v3::Request as GetMediaConfigRequest,
+        api::client::authenticated_media::get_media_config::v1::Request as GetMediaConfigRequestV1,
         events::reaction::OriginalSyncReactionEvent,
         events::room::message::{
             MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
@@ -80,8 +80,8 @@ impl Connectable for MatrixService {
             client.user_id().unwrap()
         );
 
-        // Fetch max upload size from server capabilities
-        let request = GetMediaConfigRequest::new();
+        // Fetch max upload size from server capabilities using v1 API
+        let request = GetMediaConfigRequestV1::default();
         match client.send(request).await {
             Ok(response) => {
                 let max_bytes: u64 = response.upload_size.into();

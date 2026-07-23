@@ -106,7 +106,7 @@ impl FallbackScraper {
             Err(_) => return Ok(None),
         };
 
-        let bytes = match resp.bytes().await {
+        let _bytes = match resp.bytes().await {
             Ok(b) => b,
             Err(_) => return Ok(None),
         };

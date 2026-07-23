@@ -1,4 +1,4 @@
-use crate::services::Service;
+use crate::services::traits::{Connectable, MandatoryService};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, mpsc};
 
 /// Registry for managing service lifecycles
 pub struct ServiceRegistry {
-    services: HashMap<String, Arc<Mutex<Box<dyn Service>>>>,
+    services: HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>>,
 }
 
 impl ServiceRegistry {
@@ -17,12 +17,12 @@ impl ServiceRegistry {
     }
 
     /// Register a service
-    pub fn register(&mut self, name: String, service: Box<dyn Service>) {
+    pub fn register(&mut self, name: String, service: Box<dyn MandatoryService>) {
         self.services.insert(name, Arc::new(Mutex::new(service)));
     }
 
     /// Get a service by name
-    pub fn get(&self, name: &str) -> Option<Arc<Mutex<Box<dyn Service>>>> {
+    pub fn get(&self, name: &str) -> Option<Arc<Mutex<Box<dyn MandatoryService>>>> {
         self.services.get(name).cloned()
     }
 
@@ -49,7 +49,7 @@ impl ServiceRegistry {
         for name in service_names {
             let service = self.services.get(&name).unwrap().clone();
             let mut svc = service.lock().await;
-            match svc.connect().await {
+            match Connectable::connect(&mut *svc).await {
                 Ok(_) => {
                     log::info!("Successfully connected to service: {}", name);
                 }
@@ -76,7 +76,7 @@ impl ServiceRegistry {
     pub async fn start_all(&self, tx: mpsc::Sender<crate::services::ServiceEvent>) -> Result<()> {
         for (name, service) in &self.services {
             let mut svc = service.lock().await;
-            match svc.start(tx.clone()).await {
+            match Connectable::start(&mut *svc, tx.clone()).await {
                 Ok(_) => log::info!("Started service: {}", name),
                 Err(e) => log::error!("Failed to start service {}: {}", name, e),
             }
@@ -89,7 +89,7 @@ impl ServiceRegistry {
         log::info!("Waiting for all services to be synchronized...");
         for (name, service) in &self.services {
             let svc = service.lock().await;
-            if let Err(e) = svc.wait_until_ready().await {
+            if let Err(e) = Connectable::wait_until_ready(&*svc).await {
                 log::error!("Service {} failed to become ready: {}", name, e);
             }
         }
@@ -102,19 +102,19 @@ impl ServiceRegistry {
         log::info!("Shutting down all services...");
         for (name, service) in &self.services {
             let mut svc = service.lock().await;
-            if let Err(e) = svc.disconnect().await {
+            if let Err(e) = Connectable::disconnect(&mut *svc).await {
                 log::warn!("Error disconnecting service {}: {}", name, e);
             }
         }
     }
 
     /// Convert registry into a HashMap for use with BridgeCoordinator
-    pub fn into_map(self) -> HashMap<String, Arc<Mutex<Box<dyn Service>>>> {
+    pub fn into_map(self) -> HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>> {
         self.services
     }
 
     /// Get a reference to the services map
-    pub fn services(&self) -> &HashMap<String, Arc<Mutex<Box<dyn Service>>>> {
+    pub fn services(&self) -> &HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>> {
         &self.services
     }
 }
@@ -128,12 +128,13 @@ impl Default for ServiceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::{Service, ServiceEvent, ServiceMessage};
+    use crate::services::traits::{
+        Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+    };
+    use crate::services::{ServiceEvent, ServiceMessage};
     use anyhow::Result;
     use async_trait::async_trait;
     use std::any::Any;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
     use tokio::sync::mpsc;
 
     struct MockService {
@@ -156,7 +157,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl Service for MockService {
+    impl Connectable for MockService {
         async fn connect(&mut self) -> Result<()> {
             if self.should_fail_connect {
                 return Err(anyhow::anyhow!("Simulated connection failure"));
@@ -168,19 +169,28 @@ mod tests {
             Ok(())
         }
 
-        async fn send_message(&self, _channel: &str, _message: &ServiceMessage) -> Result<String> {
-            Ok("msg123".to_string())
+        fn is_connected(&self) -> bool {
+            true
         }
 
-        async fn edit_message(
-            &self,
-            _channel: &str,
-            _message_id: &str,
-            _new_content: &str,
-        ) -> Result<()> {
+        async fn wait_until_ready(&self) -> Result<()> {
             Ok(())
         }
 
+        async fn disconnect(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl MessageSender for MockService {
+        async fn send_message(&self, _channel: &str, _message: &ServiceMessage) -> Result<String> {
+            Ok("msg123".to_string())
+        }
+    }
+
+    #[async_trait]
+    impl ReactionSender for MockService {
         async fn react_to_message(
             &self,
             _channel: &str,
@@ -189,21 +199,30 @@ mod tests {
         ) -> Result<()> {
             Ok(())
         }
+    }
 
-        fn service_name(&self) -> &str {
-            &self.name
-        }
-
+    #[async_trait]
+    impl MemberLister for MockService {
         async fn get_room_members(&self, _channel: &str) -> Result<Vec<String>> {
             Ok(vec![])
         }
+    }
 
-        async fn disconnect(&mut self) -> Result<()> {
+    #[async_trait]
+    impl MessageEditor for MockService {
+        async fn edit_message(
+            &self,
+            _channel: &str,
+            _message_id: &str,
+            _new_content: &str,
+        ) -> Result<()> {
             Ok(())
         }
+    }
 
-        async fn wait_until_ready(&self) -> Result<()> {
-            Ok(())
+    impl ServiceInfo for MockService {
+        fn service_name(&self) -> &str {
+            &self.name
         }
 
         fn as_any(&self) -> &dyn Any {

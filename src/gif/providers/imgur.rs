@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use log::{debug, info, warn};
+use log::info;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
@@ -60,6 +60,7 @@ enum ImgurData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ImgurImage {
     id: String,
     title: Option<String>,
@@ -80,6 +81,7 @@ struct ImgurImage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ImgurAlbum {
     id: String,
     images: Vec<ImgurImage>,

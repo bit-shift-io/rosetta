@@ -1,11 +1,11 @@
 use crate::bridge::alias_resolver::AliasResolver;
-use crate::bridge::formatter::{MessageFormatter, format_sender_content};
+use crate::bridge::formatter::MessageFormatter;
 use crate::bridge::matcher::BridgeMatcher;
 use crate::bridge::media::MediaHandler;
-use crate::config::{ChannelConfig, Config};
+use crate::config::Config;
 use crate::persistence::MessageStore;
-use crate::services::Service;
-use crate::services::{Attachment, ServiceEvent, ServiceMessage};
+use crate::services::ServiceMessage;
+use crate::services::traits::{MandatoryService, OptionalMembers};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ impl MessageDispatcher {
     pub async fn dispatch(
         &self,
         msg: ServiceMessage,
-        services: &HashMap<String, Arc<Mutex<Box<dyn Service>>>>,
+        services: &HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>>,
         config: &Config,
     ) -> Result<()> {
         // Deduplication: Check if we've already processed this message
@@ -141,20 +141,28 @@ impl MessageDispatcher {
                     let svc = svc_lock.lock().await;
                     status_lines.push(format!("\n**{}:{}**", ch.service, ch.channel));
 
-                    match svc.get_room_members(&ch.channel).await {
-                        Ok(members) => {
-                            if members.is_empty() {
-                                status_lines
-                                    .push("* *(No members found or not supported)*".to_string());
-                            } else {
-                                for member in members {
-                                    status_lines.push(format!("* **{}**", member));
+                    // Downcast to MemberLister for get_room_members
+                    if let Some(member_lister) =
+                        svc.as_any().downcast_ref::<Box<dyn OptionalMembers>>()
+                    {
+                        match member_lister.get_room_members(&ch.channel).await {
+                            Ok(members) => {
+                                if members.is_empty() {
+                                    status_lines.push(
+                                        "* *(No members found or not supported)*".to_string(),
+                                    );
+                                } else {
+                                    for member in members {
+                                        status_lines.push(format!("* **{}**", member));
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                status_lines.push(format!("* *Error fetching members: {}*", e));
+                            }
                         }
-                        Err(e) => {
-                            status_lines.push(format!("* *Error fetching members: {}*", e));
-                        }
+                    } else {
+                        status_lines.push("* *(Member listing not supported)*".to_string());
                     }
                 }
             }

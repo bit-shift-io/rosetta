@@ -15,13 +15,14 @@ use crate::bridge::router::EventRouter;
 use crate::bridge::status_handler::StatusHandler;
 use crate::config::Config;
 use crate::persistence::MessageStore;
+use crate::services::ServiceEvent;
 use crate::services::formatter::{DiscordFormatter, MatrixFormatter, WhatsAppFormatter};
-use crate::services::{Service, ServiceEvent, ServiceMessage, ServiceUpdate};
+use crate::services::traits::{Connectable, MandatoryService};
 
 /// Manages multiple bridges and routes messages between services
 pub struct BridgeCoordinator {
     config: Config,
-    services: HashMap<String, Arc<tokio::sync::Mutex<Box<dyn Service>>>>,
+    services: HashMap<String, Arc<tokio::sync::Mutex<Box<dyn MandatoryService>>>>,
     store: Arc<MessageStore>,
     router: EventRouter,
 }
@@ -29,7 +30,7 @@ pub struct BridgeCoordinator {
 impl BridgeCoordinator {
     pub fn new(
         config: Config,
-        services: HashMap<String, Arc<tokio::sync::Mutex<Box<dyn Service>>>>,
+        services: HashMap<String, Arc<tokio::sync::Mutex<Box<dyn MandatoryService>>>>,
     ) -> Result<Self> {
         let store = Arc::new(MessageStore::new("data/message_history.db")?);
 
@@ -65,13 +66,12 @@ impl BridgeCoordinator {
     /// Start all bridges and begin routing messages
     pub async fn start(&self) -> Result<()> {
         info!("Starting Bridge Coordinator...");
-        // ... existing code ...
         let (tx, mut event_rx) = mpsc::channel::<ServiceEvent>(100);
 
         // Start all services
         for (service_name, service) in &self.services {
             let mut svc = service.lock().await;
-            match svc.start(tx.clone()).await {
+            match Connectable::start(&mut *svc, tx.clone()).await {
                 Ok(_) => info!("Started service: {}", service_name),
                 Err(e) => error!("Failed to start service {}: {}", service_name, e),
             }
@@ -81,7 +81,7 @@ impl BridgeCoordinator {
         info!("Waiting for all services to be synchronized...");
         for (name, service) in &self.services {
             let svc = service.lock().await;
-            if let Err(e) = svc.wait_until_ready().await {
+            if let Err(e) = Connectable::wait_until_ready(&*svc).await {
                 error!("Service {} failed to become ready: {}", name, e);
             }
         }
@@ -120,42 +120,6 @@ impl BridgeCoordinator {
         }
 
         Ok(())
-    }
-
-    /// Route a message from one service to all other services in the same bridge
-    /// Delegates to the event router which uses the dispatcher
-    async fn route_message(&self, msg: ServiceMessage) {
-        // Deduplication: Check if we've already processed this message
-        match self
-            .store
-            .exists(&msg.source_service, &msg.source_channel, &msg.source_id)
-        {
-            Ok(true) => {
-                warn!(
-                    "Duplicate message ignored: {}:{}:{}",
-                    msg.source_service, msg.source_channel, msg.source_id
-                );
-                return;
-            }
-            Err(e) => {
-                error!("Failed to check for duplicate message: {}", e);
-                // Proceed cautiously
-            }
-            _ => {}
-        }
-
-        // Use the event router to handle the message
-        let services = self.services.clone();
-        let config = self.config.clone();
-        let store = self.store.clone();
-
-        if let Err(e) = self
-            .router
-            .route(ServiceEvent::NewMessage(msg), &services, &config, &store)
-            .await
-        {
-            error!("Router error: {}", e);
-        }
     }
 
     /// Graceful shutdown

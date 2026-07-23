@@ -1,5 +1,3 @@
-use pulldown_cmark;
-
 /// Trait for formatting messages for different chat protocols
 pub trait MessageFormatter {
     /// Format a text message with sender and content

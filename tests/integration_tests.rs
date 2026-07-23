@@ -2,8 +2,9 @@ use anyhow::Result;
 use reqwest::Client;
 use rosetta::config::{Config, ServiceConfig};
 use rosetta::gif::GifResolver;
+use rosetta::services::traits::{Connectable, MandatoryService};
 use rosetta::services::{
-    Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
+    discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,11 +21,11 @@ mod helpers {
     pub fn create_services(
         config: &Config,
         gif_resolver: Arc<GifResolver>,
-    ) -> HashMap<String, Arc<Mutex<Box<dyn Service>>>> {
-        let mut services: HashMap<String, Arc<Mutex<Box<dyn Service>>>> = HashMap::new();
+    ) -> HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>> {
+        let mut services: HashMap<String, Arc<Mutex<Box<dyn MandatoryService>>>> = HashMap::new();
 
         for (service_name, service_config) in &config.services {
-            let service: Box<dyn Service> = match service_config {
+            let service: Box<dyn MandatoryService> = match service_config {
                 ServiceConfig::Matrix(cfg) => {
                     Box::new(MatrixService::new(service_name.clone(), cfg.clone()))
                 }

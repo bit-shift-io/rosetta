@@ -1,5 +1,4 @@
 use crate::config::ChannelConfig;
-use std::collections::HashMap;
 
 pub struct AliasResolver;
 
@@ -18,7 +17,9 @@ impl AliasResolver {
     }
 }
 
+#[cfg(test)]
 fn make_channel_config() -> ChannelConfig {
+    use std::collections::HashMap;
     let mut aliases = HashMap::new();
     aliases.insert("@user1:matrix.org".to_string(), "Alice".to_string());
     aliases.insert("user2".to_string(), "Bob".to_string());
@@ -36,6 +37,7 @@ fn make_channel_config() -> ChannelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bridge::alias_resolver::make_channel_config;
 
     #[test]
     fn resolve_returns_alias_when_present() {

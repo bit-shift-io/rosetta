@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use rosetta::bridge;
 use rosetta::config::{Config, ServiceConfig};
 use rosetta::gif::GifResolver;
-use rosetta::services::{Service, ServiceBuilder, ServiceRegistry};
+use rosetta::services::{ServiceBuilder, ServiceRegistry};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
     // Build all services using ServiceBuilder
     let service_builder = ServiceBuilder::new(gif_resolver.clone());
-    let mut services = service_builder.build_all(&config)?;
+    let services = service_builder.build_all(&config)?;
 
     // Update GifResolver with Matrix max upload size
     service_builder

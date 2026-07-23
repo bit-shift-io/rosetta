@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use log::{debug, info, warn};
+use log::info;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
@@ -176,7 +176,7 @@ impl KlipyProvider {
             }
         }
 
-        let (format_name, mime_type, file_url) = match best_format {
+        let (_format_name, mime_type, file_url) = match best_format {
             Some(f) => f,
             None => {
                 log::debug!("[Klipy] No media formats found for item: {}", item.id);
@@ -391,9 +391,11 @@ struct KlipyFileFormat {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct KlipyFileSize {
     gif: Option<KlipyFileFormat>,
     webp: Option<KlipyFileFormat>,
+    #[allow(dead_code)]
     jpg: Option<KlipyFileFormat>,
     mp4: Option<KlipyFileFormat>,
     webm: Option<KlipyFileFormat>,

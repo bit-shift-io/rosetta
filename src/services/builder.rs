@@ -1,10 +1,7 @@
-use crate::config::{
-    DiscordServiceConfig, MatrixServiceConfig, ServiceConfig, WhatsAppServiceConfig,
-};
+use crate::config::ServiceConfig;
 use crate::gif::GifResolver;
-use crate::services::{
-    Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
-};
+use crate::services::traits::MandatoryService;
+use crate::services::{discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -19,7 +16,11 @@ impl ServiceBuilder {
     }
 
     /// Build a service from its configuration
-    pub fn build(&self, service_name: String, config: &ServiceConfig) -> Result<Box<dyn Service>> {
+    pub fn build(
+        &self,
+        service_name: String,
+        config: &ServiceConfig,
+    ) -> Result<Box<dyn MandatoryService>> {
         match config {
             ServiceConfig::Matrix(cfg) => {
                 Ok(Box::new(MatrixService::new(service_name, cfg.clone())))
@@ -39,7 +40,7 @@ impl ServiceBuilder {
     pub fn build_all(
         &self,
         config: &crate::config::Config,
-    ) -> Result<Vec<(String, Box<dyn Service>)>> {
+    ) -> Result<Vec<(String, Box<dyn MandatoryService>)>> {
         let mut services = Vec::new();
 
         for (service_name, service_config) in &config.services {
@@ -53,7 +54,7 @@ impl ServiceBuilder {
     /// Get max upload size from Matrix services and update GifResolver
     pub async fn update_gif_resolver_from_matrix(
         &self,
-        services: &[(String, Box<dyn Service>)],
+        services: &[(String, Box<dyn MandatoryService>)],
     ) -> Result<()> {
         for (name, service) in services {
             if let Some(matrix_svc) = service.as_any().downcast_ref::<MatrixService>() {

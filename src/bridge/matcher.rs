@@ -1,5 +1,4 @@
 use crate::config::{ChannelConfig, Config};
-use std::collections::HashMap;
 
 pub struct BridgeMatcher;
 
@@ -33,32 +32,41 @@ impl BridgeMatcher {
     }
 }
 
-fn make_channel_config(service: &str, channel: &str) -> ChannelConfig {
-    ChannelConfig {
-        service: service.to_string(),
-        channel: channel.to_string(),
-        display_names: true,
-        enable_media: true,
-        bridge_own_messages: false,
-        aliases: HashMap::new(),
-    }
-}
+#[cfg(test)]
+mod test_utils {
+    use crate::config::{ChannelConfig, Config};
+    use std::collections::HashMap;
 
-fn make_config(bridges: HashMap<String, Vec<ChannelConfig>>) -> Config {
-    Config {
-        services: HashMap::new(),
-        bridges,
-        media: None,
+    pub fn make_channel_config(service: &str, channel: &str) -> ChannelConfig {
+        ChannelConfig {
+            service: service.to_string(),
+            channel: channel.to_string(),
+            display_names: true,
+            enable_media: true,
+            bridge_own_messages: false,
+            aliases: HashMap::new(),
+        }
+    }
+
+    pub fn make_config(bridges: HashMap<String, Vec<ChannelConfig>>) -> Config {
+        Config {
+            services: HashMap::new(),
+            bridges,
+            media: None,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::test_utils::*;
+    use crate::bridge::matcher::BridgeMatcher;
+    use crate::config::Config;
+    use std::collections::HashMap;
 
     #[test]
     fn find_targets_single_bridge_returns_other_channels() {
-        let mut channels = vec![
+        let channels = vec![
             make_channel_config("matrix", "room1"),
             make_channel_config("discord", "channel1"),
             make_channel_config("whatsapp", "group1"),
@@ -79,7 +87,7 @@ mod tests {
 
     #[test]
     fn find_targets_excludes_source_channel() {
-        let mut channels = vec![
+        let channels = vec![
             make_channel_config("matrix", "room1"),
             make_channel_config("matrix", "room2"),
             make_channel_config("discord", "channel1"),
@@ -101,11 +109,11 @@ mod tests {
 
     #[test]
     fn find_targets_multiple_bridges_returns_matching_bridge() {
-        let mut channels1 = vec![
+        let channels1 = vec![
             make_channel_config("matrix", "room1"),
             make_channel_config("discord", "channel1"),
         ];
-        let mut channels2 = vec![
+        let channels2 = vec![
             make_channel_config("matrix", "room2"),
             make_channel_config("whatsapp", "group1"),
         ];
@@ -125,7 +133,7 @@ mod tests {
 
     #[test]
     fn find_targets_no_matching_bridge_returns_empty() {
-        let mut channels = vec![
+        let channels = vec![
             make_channel_config("matrix", "room1"),
             make_channel_config("discord", "channel1"),
         ];
@@ -142,7 +150,7 @@ mod tests {
 
     #[test]
     fn find_targets_source_not_in_any_bridge_returns_empty() {
-        let mut channels = vec![
+        let channels = vec![
             make_channel_config("matrix", "room1"),
             make_channel_config("discord", "channel1"),
         ];
