@@ -266,7 +266,7 @@ mod tests {
         let gif_resolver = helpers::create_gif_resolver(&config);
 
         // Known Klipy test URL (update as needed)
-        let test_url = "https://klipy.com/gifs/test-gif-animation";
+        let test_url = "https://klipy.com/gifs/cat-sandwich-5";
 
         let result = gif_resolver.resolve(test_url).await.map_err(|e| {
             eprintln!("WARN: Klipy resolver error: {}", e);

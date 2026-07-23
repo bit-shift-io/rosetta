@@ -32,8 +32,8 @@ RUN mkdir src && \
 COPY src ./src
 COPY data ./data
 
-# Touch main.rs to ensure the final binary is linked/built with real source
-RUN touch src/main.rs && \
+# Touch both main.rs and lib.rs to ensure both binary and library are rebuilt with real source
+RUN touch src/main.rs src/lib.rs && \
     RUSTFLAGS="-C target-feature=-crt-static" cargo build --release && \
     cp target/release/rosetta /app/rosetta-bin
 
