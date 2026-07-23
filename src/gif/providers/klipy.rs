@@ -150,6 +150,7 @@ impl KlipyProvider {
             formats.insert(format_key, media.url);
         }
 
+        // preferred order. dont change this order!
         let preferred_formats = [
             ("gif", "image/gif"),
             ("webp", "image/webp"),
@@ -212,8 +213,9 @@ impl KlipyProvider {
     }
 
     fn extract_media_from_klipy_item(&self, item: KlipyItem) -> Result<Option<ResolvedGif>> {
-        // Define size tiers from smallest to largest to prefer smaller files
-        let size_tiers = ["xs", "sm", "md", "hd"];
+        // preferred order. dont change this order!
+        // remove hd for now "hd"
+        let size_tiers = ["md", "sm", "xs"];
 
         let preferred_formats = [
             ("gif", "image/gif"),
@@ -228,7 +230,7 @@ impl KlipyProvider {
             self.max_upload_size
         );
 
-        // Iterate through size tiers from smallest to largest
+        // Iterate through size tiers
         for size_name in &size_tiers {
             if let Some(file_size) = item.file_sizes.get(*size_name) {
                 // Check each preferred format in order
