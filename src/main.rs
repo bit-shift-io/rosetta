@@ -5,16 +5,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-mod bridge;
-mod config;
-mod gif;
-mod persistence;
-mod services;
-
-use crate::bridge::BridgeCoordinator;
-use crate::config::{Config, ServiceConfig};
-use crate::gif::GifResolver;
-use crate::services::{
+use rosetta::bridge::BridgeCoordinator;
+use rosetta::config::{Config, ServiceConfig};
+use rosetta::gif::GifResolver;
+use rosetta::services::{
     Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
 };
 

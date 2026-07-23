@@ -3,6 +3,10 @@ name = "rosetta"
 version = "0.2.0"
 edition = "2024"
 
+[lib]
+name = "rosetta"
+path = "src/lib.rs"
+
 
 [dependencies]
 anyhow = "1.0.100"
@@ -29,3 +33,6 @@ wa-rs-core = "0.2"
 wa-rs-binary = "0.2"
 wa-rs-tokio-transport = "0.2"
 wa-rs-ureq-http = "0.2"
+
+[dev-dependencies]
+serial_test = "3"

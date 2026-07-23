@@ -103,6 +103,14 @@ cargo fmt
 cargo clippy --all-targets --all-features
 ```
 
+### Running Integration Tests
+Integration tests require a valid `data/config.yaml` with service credentials and GIF provider API keys. Tests skip gracefully with a warning if credentials are missing.
+
+```bash
+# Run all integration tests sequentially (required to avoid service connection conflicts)
+cargo test --test integration_tests -- --test-threads=1
+```
+
 ### Podman / Docker Deployment
 ```bash
 # Build the container

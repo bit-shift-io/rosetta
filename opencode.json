@@ -2,18 +2,18 @@
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "read": {
-      "data/**": "deny",
-      "data": "deny",
-      "*": "allow"
+      "*": "allow",
+      "data": "allow",
+      "data/**": "allow"
     },
     "edit": {
-      "data/**": "deny",
+      "*": "allow",
       "data": "deny",
-      "*": "allow"
+      "data/**": "deny"
     },
     "bash": {
-      "*data*": "deny",
-      "*": "ask"
+      "*": "allow",
+      "*data*": "deny"
     }
   }
 }
