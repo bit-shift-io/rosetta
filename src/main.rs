@@ -1,16 +1,13 @@
 #![recursion_limit = "256"]
 use anyhow::Result;
 use log::{error, info};
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
-use rosetta::bridge::BridgeCoordinator;
+use rosetta::bridge;
 use rosetta::config::{Config, ServiceConfig};
 use rosetta::gif::GifResolver;
-use rosetta::services::{
-    Service, discord::DiscordService, matrix::MatrixService, whatsapp::WhatsAppService,
-};
+use rosetta::services::{Service, ServiceBuilder, ServiceRegistry};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -41,6 +38,7 @@ async fn main() -> Result<()> {
     // Load configuration
     let config = Config::load("data/config.yaml")?;
 
+    // Create GifResolver
     let gif_resolver = Arc::new(GifResolver::new(
         &config.media,
         config
@@ -56,60 +54,41 @@ async fn main() -> Result<()> {
         config.bridges.len()
     );
 
-    // Initialize all services
-    let mut services: HashMap<String, Arc<Mutex<Box<dyn Service>>>> = HashMap::new();
+    // Build all services using ServiceBuilder
+    let service_builder = ServiceBuilder::new(gif_resolver.clone());
+    let mut services = service_builder.build_all(&config)?;
 
-    for (service_name, service_config) in &config.services {
-        info!(
-            "Initializing service: {} ({:?})",
-            service_name,
-            match service_config {
-                ServiceConfig::Matrix(_) => "Matrix",
-                ServiceConfig::WhatsApp(_) => "WhatsApp",
-                ServiceConfig::Discord(_) => "Discord",
-            }
-        );
+    // Update GifResolver with Matrix max upload size
+    service_builder
+        .update_gif_resolver_from_matrix(&services)
+        .await?;
 
-        let service: Box<dyn Service> = match service_config {
-            ServiceConfig::Matrix(cfg) => {
-                Box::new(MatrixService::new(service_name.clone(), cfg.clone()))
-            }
-            ServiceConfig::WhatsApp(cfg) => {
-                Box::new(WhatsAppService::new(service_name.clone(), cfg.clone()))
-            }
-            ServiceConfig::Discord(cfg) => Box::new(DiscordService::new(
-                service_name.clone(),
-                cfg.clone(),
-                gif_resolver.clone(),
-            )),
-        };
+    // Create registry and register services
+    let mut registry = ServiceRegistry::new();
+    for (name, service) in services {
+        registry.register(name, service);
+    }
 
-        let service = Arc::new(Mutex::new(service));
+    // Connect all services
+    registry.connect_all().await?;
 
-        // Connect to the service
+    // Update GifResolver again after Matrix connects
+    if let Some((_, matrix_svc)) = registry.services().iter().find(|(name, _)| {
+        config
+            .services
+            .get(*name)
+            .map(|cfg| matches!(cfg, ServiceConfig::Matrix(_)))
+            .unwrap_or(false)
+    }) {
+        let svc = matrix_svc.lock().await;
+        if let Some(matrix_svc) = svc
+            .as_any()
+            .downcast_ref::<rosetta::services::matrix::MatrixService>()
         {
-            let mut svc = service.lock().await;
-            match svc.connect().await {
-                Ok(_) => info!("Successfully connected to service: {}", service_name),
-                Err(e) => {
-                    error!("Failed to connect to service {}: {}", service_name, e);
-                    // For Discord (not implemented), we'll skip it but continue
-                    if matches!(service_config, ServiceConfig::Discord(_)) {
-                        continue;
-                    }
-                    return Err(e);
-                }
-            }
-
-            // If this is a Matrix service, get the max upload size and set it on the GifResolver
-            if let Some(matrix_svc) = svc.as_any().downcast_ref::<MatrixService>() {
-                if let Some(max_size) = matrix_svc.max_upload_size() {
-                    gif_resolver.set_max_upload_size(max_size).await;
-                }
+            if let Some(max_size) = matrix_svc.max_upload_size() {
+                gif_resolver.set_max_upload_size(max_size).await;
             }
         }
-
-        services.insert(service_name.clone(), service);
     }
 
     // Log bridge configuration
@@ -124,8 +103,15 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Create event channel and start all services
+    let (tx, _rx) = mpsc::channel::<rosetta::services::ServiceEvent>(100);
+    registry.start_all(tx.clone()).await?;
+
+    // Wait for all services to be ready
+    registry.wait_all_ready().await?;
+
     // Create and start bridge coordinator
-    let coordinator = BridgeCoordinator::new(config, services)?;
+    let coordinator = bridge::BridgeCoordinator::new(config, registry.services().clone())?;
     info!("All services started. Bridge is running...");
 
     // Run coordinator and wait for Ctrl-C
@@ -139,6 +125,7 @@ async fn main() -> Result<()> {
         _ = tokio::signal::ctrl_c() => {
              info!("Ctrl-C received, shutting down...");
              coordinator.shutdown().await;
+             registry.shutdown_all().await;
         }
     }
 

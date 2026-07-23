@@ -33,9 +33,29 @@ pub struct ServiceMessage {
 }
 
 // Re-export service implementations
+pub mod builder;
 pub mod discord;
 pub mod matrix;
+pub mod registry;
+pub mod traits;
 pub mod whatsapp;
+
+// Re-export formatters
+pub mod formatter {
+    pub use crate::services::discord::formatter::DiscordFormatter;
+    pub use crate::services::matrix::formatter::MatrixFormatter;
+    pub use crate::services::whatsapp::formatter::WhatsAppFormatter;
+}
+
+// Re-export fine-grained traits
+pub use crate::services::traits::{
+    Connectable, MandatoryService, MemberLister, MessageEditor, MessageSender, OptionalEditor,
+    OptionalMembers, ReactionSender, ServiceInfo,
+};
+
+// Re-export ServiceBuilder and ServiceRegistry
+pub use crate::services::builder::ServiceBuilder;
+pub use crate::services::registry::ServiceRegistry;
 
 /// Represents an update to an existing message (edit)
 #[derive(Debug, Clone)]
@@ -68,7 +88,12 @@ pub enum ServiceEvent {
     // Potential future events: DeleteMessage, UserJoin, etc.
 }
 
-/// Trait that all chat service implementations must implement
+// Keep the old Service trait for backward compatibility in some places
+// but deprecate it - new code should use the fine-grained traits directly
+#[deprecated(
+    since = "0.3.0",
+    note = "Use fine-grained traits (Connectable, MessageSender, etc.) instead"
+)]
 #[async_trait]
 pub trait Service: Send + Sync + Any {
     /// Connect to the service and authenticate
@@ -116,4 +141,68 @@ pub trait Service: Send + Sync + Any {
     /// Get the underlying Any for downcasting
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+// Blanket implementation for types implementing all fine-grained traits
+#[async_trait]
+impl<T> Service for T
+where
+    T: Connectable
+        + MessageSender
+        + MessageEditor
+        + ReactionSender
+        + MemberLister
+        + ServiceInfo
+        + Send
+        + Sync
+        + Any
+        + 'static,
+{
+    async fn connect(&mut self) -> Result<()> {
+        Connectable::connect(self).await
+    }
+
+    async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
+        Connectable::start(self, tx).await
+    }
+
+    async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
+        MessageSender::send_message(self, channel, message).await
+    }
+
+    async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()> {
+        MessageEditor::edit_message(self, channel, message_id, new_content).await
+    }
+
+    async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
+        ReactionSender::react_to_message(self, channel, message_id, emoji).await
+    }
+
+    fn service_name(&self) -> &str {
+        ServiceInfo::service_name(self)
+    }
+
+    fn is_connected(&self) -> bool {
+        Connectable::is_connected(self)
+    }
+
+    async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
+        MemberLister::get_room_members(self, channel).await
+    }
+
+    async fn disconnect(&mut self) -> Result<()> {
+        Connectable::disconnect(self).await
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        Connectable::wait_until_ready(self).await
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        ServiceInfo::as_any(self)
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        ServiceInfo::as_any_mut(self)
+    }
 }

@@ -3689,6 +3689,7 @@ dependencies = [
  "serde_yaml",
  "serenity",
  "serial_test",
+ "tempfile",
  "tokio",
  "url",
  "urlencoding",

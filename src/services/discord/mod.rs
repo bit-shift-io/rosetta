@@ -1,7 +1,17 @@
+// Discord service implementation
+pub mod formatter;
+
+use crate::bridge::formatter::MessageFormatter;
+use crate::config::DiscordServiceConfig;
+use crate::gif::GifResolver;
+use crate::services::formatter::DiscordFormatter;
+use crate::services::traits::{
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+};
+use crate::services::{ServiceEvent, ServiceMessage, ServiceUpdate};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{error, info, warn};
-use reqwest::Url;
 use serenity::{
     async_trait as serenity_async_trait,
     client::{Client, Context, EventHandler},
@@ -12,12 +22,6 @@ use std::any::Any;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
-
-use crate::config::DiscordServiceConfig;
-use crate::gif::GifResolver;
-use crate::services::{Service, ServiceEvent, ServiceMessage, ServiceUpdate};
-
-use serenity::model::event::MessageUpdateEvent;
 
 struct DiscordHandler {
     tx: mpsc::Sender<ServiceEvent>,
@@ -162,7 +166,7 @@ impl EventHandler for DiscordHandler {
         ctx: Context,
         _old_if_available: Option<Message>,
         _new: Option<Message>,
-        event: MessageUpdateEvent,
+        event: serenity::model::event::MessageUpdateEvent,
     ) {
         if let Some(content) = event.content {
             let is_own = if let Some(author) = &event.author {
@@ -266,7 +270,6 @@ impl EventHandler for DiscordHandler {
     }
 }
 
-/// Discord service implementation
 pub struct DiscordService {
     name: String,
     config: DiscordServiceConfig,
@@ -274,6 +277,7 @@ pub struct DiscordService {
     http: Option<Arc<serenity::http::Http>>,
     cache: Option<Arc<serenity::cache::Cache>>,
     gif_resolver: Arc<GifResolver>,
+    formatter: DiscordFormatter,
 }
 
 impl DiscordService {
@@ -285,12 +289,13 @@ impl DiscordService {
             http: None,
             cache: None,
             gif_resolver,
+            formatter: DiscordFormatter::new(),
         }
     }
 }
 
 #[async_trait]
-impl Service for DiscordService {
+impl Connectable for DiscordService {
     async fn connect(&mut self) -> Result<()> {
         // We'll create the client in start() because we need the tx channel
         info!("[Discord:{}] Ready to connect", self.name);
@@ -298,13 +303,13 @@ impl Service for DiscordService {
     }
 
     async fn start(&mut self, tx: mpsc::Sender<ServiceEvent>) -> Result<()> {
-        let intents = GatewayIntents::GUILD_MESSAGES
-            | GatewayIntents::DIRECT_MESSAGES
-            | GatewayIntents::MESSAGE_CONTENT
-            | GatewayIntents::GUILD_MEMBERS
-            | GatewayIntents::GUILD_MESSAGE_REACTIONS
-            | GatewayIntents::DIRECT_MESSAGE_REACTIONS
-            | GatewayIntents::GUILDS;
+        let intents = serenity::model::gateway::GatewayIntents::GUILD_MESSAGES
+            | serenity::model::gateway::GatewayIntents::DIRECT_MESSAGES
+            | serenity::model::gateway::GatewayIntents::MESSAGE_CONTENT
+            | serenity::model::gateway::GatewayIntents::GUILD_MEMBERS
+            | serenity::model::gateway::GatewayIntents::GUILD_MESSAGE_REACTIONS
+            | serenity::model::gateway::GatewayIntents::DIRECT_MESSAGE_REACTIONS
+            | serenity::model::gateway::GatewayIntents::GUILDS;
 
         let handler = DiscordHandler {
             tx,
@@ -336,6 +341,46 @@ impl Service for DiscordService {
         Ok(())
     }
 
+    fn is_connected(&self) -> bool {
+        self.client.is_some() && self.http.is_some()
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        info!("[Discord:{}] Waiting for gateway connection...", self.name);
+
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Discord Cache not initialized"))?;
+
+        // Wait up to 30 seconds for guilds to be cached (indicates ready)
+        for _ in 0..30 {
+            if cache.guild_count() > 0 {
+                info!(
+                    "[Discord:{}] Gateway connected and cache populated!",
+                    self.name
+                );
+                return Ok(());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+
+        warn!(
+            "[Discord:{}] Wait until ready timed out, but proceeding anyway.",
+            self.name
+        );
+        Ok(())
+    }
+
+    async fn disconnect(&mut self) -> Result<()> {
+        info!("[Discord:{}] Disconnecting", self.name);
+        // Serenity client cleanup handled by drop
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl MessageSender for DiscordService {
     async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
         let http = self
             .http
@@ -349,12 +394,9 @@ impl Service for DiscordService {
         let channel_id: u64 = channel.parse()?;
         let channel_id = ChannelId::new(channel_id);
 
-        let formatted_message = match (message.sender.is_empty(), message.content.is_empty()) {
-            (true, true) => "".to_string(),
-            (true, false) => message.content.clone(),
-            (false, true) => format!("**{}**", message.sender),
-            (false, false) => format!("**{}**: {}", message.sender, message.content),
-        };
+        let formatted_message =
+            self.formatter
+                .format_text(&message.sender, &message.content, message.is_own);
         let mut builder = serenity::builder::CreateMessage::new().content(&formatted_message);
 
         let mut files = Vec::new();
@@ -375,7 +417,10 @@ impl Service for DiscordService {
             Err(e) => Err(anyhow::anyhow!("Discord send error: {}", e)),
         }
     }
+}
 
+#[async_trait]
+impl MessageEditor for DiscordService {
     async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()> {
         let http = self
             .http
@@ -392,7 +437,10 @@ impl Service for DiscordService {
         channel_id.edit_message(http, msg_id, builder).await?;
         Ok(())
     }
+}
 
+#[async_trait]
+impl ReactionSender for DiscordService {
     async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
         let http = self
             .http
@@ -415,15 +463,10 @@ impl Service for DiscordService {
             .await?;
         Ok(())
     }
+}
 
-    fn service_name(&self) -> &str {
-        &self.name
-    }
-
-    fn is_connected(&self) -> bool {
-        self.client.is_some() && self.http.is_some()
-    }
-
+#[async_trait]
+impl MemberLister for DiscordService {
     async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
         let cache = self
             .cache
@@ -516,38 +559,11 @@ impl Service for DiscordService {
 
         Ok(result)
     }
+}
 
-    async fn disconnect(&mut self) -> Result<()> {
-        info!("[Discord:{}] Disconnecting", self.name);
-        // Serenity client cleanup handled by drop
-        Ok(())
-    }
-
-    async fn wait_until_ready(&self) -> Result<()> {
-        info!("[Discord:{}] Waiting for gateway connection...", self.name);
-
-        let cache = self
-            .cache
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Discord Cache not initialized"))?;
-
-        // Wait up to 30 seconds for guilds to be cached (indicates ready)
-        for _ in 0..30 {
-            if cache.guild_count() > 0 {
-                info!(
-                    "[Discord:{}] Gateway connected and cache populated!",
-                    self.name
-                );
-                return Ok(());
-            }
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }
-
-        warn!(
-            "[Discord:{}] Wait until ready timed out, but proceeding anyway.",
-            self.name
-        );
-        Ok(())
+impl ServiceInfo for DiscordService {
+    fn service_name(&self) -> &str {
+        &self.name
     }
 
     fn as_any(&self) -> &dyn Any {

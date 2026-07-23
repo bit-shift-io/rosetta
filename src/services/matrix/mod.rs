@@ -1,9 +1,16 @@
+// Matrix service implementation
+pub mod formatter;
+
+use crate::bridge::formatter::MessageFormatter;
 use crate::config::MatrixServiceConfig;
-use crate::services::{Service, ServiceEvent, ServiceMessage};
+use crate::services::formatter::MatrixFormatter;
+use crate::services::traits::{
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+};
+use crate::services::{ServiceEvent, ServiceMessage};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{error, info, warn};
-use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::{
     Client as MatrixClient, Room,
     config::SyncSettings,
@@ -28,6 +35,7 @@ pub struct MatrixService {
     client: Option<MatrixClient>,
     start_time: std::time::SystemTime,
     max_upload_size: Option<u64>,
+    formatter: MatrixFormatter,
 }
 
 impl MatrixService {
@@ -38,6 +46,7 @@ impl MatrixService {
             client: None,
             start_time: std::time::SystemTime::now(),
             max_upload_size: None,
+            formatter: MatrixFormatter::new(),
         }
     }
 
@@ -52,7 +61,7 @@ impl MatrixService {
 }
 
 #[async_trait]
-impl Service for MatrixService {
+impl Connectable for MatrixService {
     async fn connect(&mut self) -> Result<()> {
         let client = MatrixClient::builder()
             .homeserver_url(&self.config.homeserver_url)
@@ -236,9 +245,9 @@ impl Service for MatrixService {
                         let media_client = safe_client.media();
 
                         // matrix-sdk's `get_media_content` expects a `MediaRequestParameters`
-                        let params = MediaRequestParameters {
+                        let params = matrix_sdk::media::MediaRequestParameters {
                             source: source.clone(),
-                            format: MediaFormat::File,
+                            format: matrix_sdk::media::MediaFormat::File,
                         };
 
                         match media_client.get_media_content(&params, true).await {
@@ -366,6 +375,55 @@ impl Service for MatrixService {
         Ok(())
     }
 
+    fn is_connected(&self) -> bool {
+        self.client.is_some()
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
+
+        info!("[Matrix:{}] Waiting for initial sync...", self.name);
+
+        for _ in 0..30 {
+            if !client.joined_rooms().is_empty() {
+                info!("[Matrix:{}] Synchronized and ready!", self.name);
+                return Ok(());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+
+        warn!(
+            "[Matrix:{}] Wait until ready timed out, but proceeding anyway.",
+            self.name
+        );
+        Ok(())
+    }
+
+    async fn disconnect(&mut self) -> Result<()> {
+        info!("[Matrix:{}] Disconnecting", self.name);
+        Ok(())
+    }
+}
+
+impl ServiceInfo for MatrixService {
+    fn service_name(&self) -> &str {
+        &self.name
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+#[async_trait]
+impl MessageSender for MatrixService {
     async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
         let client = self
             .client
@@ -376,20 +434,15 @@ impl Service for MatrixService {
 
         if let Some(room) = client.get_room(room_id) {
             let mut last_event_id = String::new();
+
+            // 1. Send text if present AND no attachments (otherwise text goes in caption)
             if !message.content.is_empty() && message.attachments.is_empty() {
-                let body = if message.sender.is_empty() {
-                    message.content.clone()
-                } else {
-                    format!("**{}**: {}", message.sender, message.content)
-                };
+                let body =
+                    self.formatter
+                        .format_text(&message.sender, &message.content, message.is_own);
 
                 // Convert markdown to HTML for Matrix
-                let mut options = pulldown_cmark::Options::empty();
-                options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
-
-                let parser = pulldown_cmark::Parser::new_ext(&body, options);
-                let mut html_body = String::new();
-                pulldown_cmark::html::push_html(&mut html_body, parser);
+                let html_body = self.formatter.markdown_to_html(&body);
 
                 let content = RoomMessageEventContent::text_html(body, html_body);
                 let resp = room.send(content).await?;
@@ -399,15 +452,14 @@ impl Service for MatrixService {
             // 2. Send attachments
             for attachment in &message.attachments {
                 let mime = mime::Mime::from_str(&attachment.mime_type)
-                    .unwrap_or(mime::APPLICATION_OCTET_STREAM);
+                    .unwrap_or_else(|_| mime::APPLICATION_OCTET_STREAM);
 
-                // Construct plain caption without formatting
-                let caption = match (message.sender.is_empty(), message.content.is_empty()) {
-                    (true, true) => "".to_string(),
-                    (true, false) => message.content.clone(),
-                    (false, true) => format!("Sent by {}", message.sender),
-                    (false, false) => format!("{}: {}", message.sender, message.content),
-                };
+                // Construct caption using formatter
+                let caption = self.formatter.format_caption(
+                    &message.sender,
+                    &message.content,
+                    message.is_own,
+                );
 
                 let caption_content = TextMessageEventContent::plain(caption);
                 let config =
@@ -434,7 +486,10 @@ impl Service for MatrixService {
             Err(anyhow::anyhow!("Room not found: {}", channel))
         }
     }
+}
 
+#[async_trait]
+impl MessageEditor for MatrixService {
     async fn edit_message(&self, channel: &str, message_id: &str, new_content: &str) -> Result<()> {
         let client = self
             .client
@@ -456,7 +511,10 @@ impl Service for MatrixService {
             Err(anyhow::anyhow!("Room not found"))
         }
     }
+}
 
+#[async_trait]
+impl ReactionSender for MatrixService {
     async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
         let client = self
             .client
@@ -476,15 +534,10 @@ impl Service for MatrixService {
             Err(anyhow::anyhow!("Room not found"))
         }
     }
+}
 
-    fn service_name(&self) -> &str {
-        &self.name
-    }
-
-    fn is_connected(&self) -> bool {
-        self.client.is_some()
-    }
-
+#[async_trait]
+impl MemberLister for MatrixService {
     async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
         let client = self
             .client
@@ -514,41 +567,5 @@ impl Service for MatrixService {
         } else {
             Ok(vec!["Room not found".to_string()])
         }
-    }
-
-    async fn disconnect(&mut self) -> Result<()> {
-        info!("[Matrix:{}] Disconnecting", self.name);
-        Ok(())
-    }
-
-    async fn wait_until_ready(&self) -> Result<()> {
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
-
-        info!("[Matrix:{}] Waiting for initial sync...", self.name);
-
-        for _ in 0..30 {
-            if !client.joined_rooms().is_empty() {
-                info!("[Matrix:{}] Synchronized and ready!", self.name);
-                return Ok(());
-            }
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }
-
-        warn!(
-            "[Matrix:{}] Wait until ready timed out, but proceeding anyway.",
-            self.name
-        );
-        Ok(())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

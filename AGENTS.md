@@ -49,6 +49,10 @@ To minimize API rate limits and token usage during automated agent loops, adhere
   * `ChannelConfig`: Configurations for channels in bridges (includes alias mapping, own-message bridging flags, and media-bridging toggle).
 * **[src/bridge.rs](file:///home/bronson/Projects/rosetta/src/bridge.rs)**:
   * `BridgeCoordinator`: Runs the main event routing loop, coordinates message forwarding, message edits, reaction sync, and answers the `.status` command.
+* **[src/bridge/dispatcher.rs](file:///home/bronson/Projects/rosetta/src/bridge/dispatcher.rs)**:
+  * `MessageDispatcher`: Routes messages between services, applies alias resolution, media policy, and formatters.
+* **[src/bridge/alias_resolver.rs](file:///home/bronson/Projects/rosetta/src/bridge/alias_resolver.rs)**:
+  * `AliasResolver`: Resolves sender IDs to display names using configured aliases; falls back to the source service's provided display name.
 * **[src/persistence.rs](file:///home/bronson/Projects/rosetta/src/persistence.rs)**:
   * `MessageStore`: Core helper interacting with `data/message_history.db`. Maps incoming source message IDs to the generated destination message IDs on other services.
 * **[src/services/mod.rs](file:///home/bronson/Projects/rosetta/src/services/mod.rs)**:

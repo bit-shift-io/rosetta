@@ -1,3 +1,13 @@
+// WhatsApp service implementation
+pub mod formatter;
+
+use crate::bridge::formatter::MessageFormatter;
+use crate::config::WhatsAppServiceConfig;
+use crate::services::formatter::WhatsAppFormatter;
+use crate::services::traits::{
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+};
+use crate::services::{ServiceEvent, ServiceMessage};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{error, info};
@@ -16,13 +26,11 @@ use wa_rs_core::types::events::Event as WaEvent;
 use wa_rs_tokio_transport::TokioWebSocketTransportFactory;
 use wa_rs_ureq_http::UreqHttpClient;
 
-use crate::config::WhatsAppServiceConfig;
-use crate::services::{Service, ServiceEvent, ServiceMessage};
-
 pub struct WhatsAppService {
     name: String,
     config: WhatsAppServiceConfig,
     client: Option<Arc<wa_rs::Client>>,
+    formatter: WhatsAppFormatter,
 }
 
 impl WhatsAppService {
@@ -31,12 +39,13 @@ impl WhatsAppService {
             name,
             config,
             client: None,
+            formatter: WhatsAppFormatter::new(),
         }
     }
 }
 
 #[async_trait]
-impl Service for WhatsAppService {
+impl Connectable for WhatsAppService {
     async fn connect(&mut self) -> Result<()> {
         let database_path = self
             .config
@@ -235,6 +244,30 @@ impl Service for WhatsAppService {
         Ok(())
     }
 
+    fn is_connected(&self) -> bool {
+        self.client.is_some()
+    }
+
+    async fn wait_until_ready(&self) -> Result<()> {
+        info!(
+            "[WhatsApp:{}] Waiting for connection to stabilize...",
+            self.name
+        );
+        if self.client.is_some() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            info!("[WhatsApp:{}] Ready!", self.name);
+        }
+        Ok(())
+    }
+
+    async fn disconnect(&mut self) -> Result<()> {
+        info!("[WhatsApp:{}] Disconnecting", self.name);
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl MessageSender for WhatsAppService {
     async fn send_message(&self, channel: &str, message: &ServiceMessage) -> Result<String> {
         let client = self
             .client
@@ -246,11 +279,9 @@ impl Service for WhatsAppService {
 
         // 1. Send text if present AND no attachments (otherwise text goes in caption)
         if !message.content.is_empty() && message.attachments.is_empty() {
-            let text = if message.sender.is_empty() {
-                message.content.clone()
-            } else {
-                format!("*{}*: {}", message.sender, message.content)
-            };
+            let text =
+                self.formatter
+                    .format_text(&message.sender, &message.content, message.is_own);
             let wa_message = wa::Message {
                 extended_text_message: Some(Box::new(wa::message::ExtendedTextMessage {
                     text: Some(text),
@@ -328,16 +359,23 @@ impl Service for WhatsAppService {
 
         Ok(last_id)
     }
+}
 
+#[async_trait]
+impl MessageEditor for WhatsAppService {
     async fn edit_message(
         &self,
         _channel: &str,
         _message_id: &str,
         _new_content: &str,
     ) -> Result<()> {
-        Ok(())
+        // WhatsApp doesn't support message editing via the API
+        Err(anyhow::anyhow!("WhatsApp doesn't support message editing"))
     }
+}
 
+#[async_trait]
+impl ReactionSender for WhatsAppService {
     async fn react_to_message(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
         let client = self
             .client
@@ -368,30 +406,19 @@ impl Service for WhatsAppService {
         client.send_message(jid, wa_message).await?;
         Ok(())
     }
+}
 
+#[async_trait]
+impl MemberLister for WhatsAppService {
+    async fn get_room_members(&self, _channel: &str) -> Result<Vec<String>> {
+        // WhatsApp doesn't have a concept of room members like Matrix/Discord
+        Ok(vec![])
+    }
+}
+
+impl ServiceInfo for WhatsAppService {
     fn service_name(&self) -> &str {
         &self.name
-    }
-
-    fn is_connected(&self) -> bool {
-        self.client.is_some()
-    }
-
-    async fn disconnect(&mut self) -> Result<()> {
-        info!("[WhatsApp:{}] Disconnecting", self.name);
-        Ok(())
-    }
-
-    async fn wait_until_ready(&self) -> Result<()> {
-        info!(
-            "[WhatsApp:{}] Waiting for connection to stabilize...",
-            self.name
-        );
-        if self.client.is_some() {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            info!("[WhatsApp:{}] Ready!", self.name);
-        }
-        Ok(())
     }
 
     fn as_any(&self) -> &dyn Any {
