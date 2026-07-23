@@ -23,6 +23,7 @@ COPY Cargo.toml Cargo.lock ./
 
 # 2. Build dependencies only (dummy source)
 RUN mkdir src && \
+    echo "pub fn main() {}" > src/lib.rs && \
     echo "fn main() {}" > src/main.rs && \
     RUSTFLAGS="-C target-feature=-crt-static" cargo build --release && \
     rm -rf src

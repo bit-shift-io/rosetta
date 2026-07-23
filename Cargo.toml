@@ -7,6 +7,9 @@ edition = "2024"
 name = "rosetta"
 path = "src/lib.rs"
 
+[[bin]]
+name = "rosetta"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.100"
