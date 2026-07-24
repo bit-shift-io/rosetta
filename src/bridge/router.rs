@@ -81,7 +81,7 @@ mod tests {
     use crate::persistence::MessageStore;
     use crate::services::traits::{
         Connectable, MandatoryService, MemberLister, MessageEditor, MessageSender, ReactionSender,
-        ServiceInfo,
+        RoomNameFetcher, ServiceInfo,
     };
     use crate::services::{ServiceEvent, ServiceMessage, ServiceReaction, ServiceUpdate};
     use anyhow::Result;
@@ -162,6 +162,13 @@ mod tests {
     }
 
     #[async_trait]
+    impl RoomNameFetcher for MockService {
+        async fn get_room_name(&self, _channel: &str) -> Result<Option<String>> {
+            Ok(None)
+        }
+    }
+
+    #[async_trait]
     impl MessageEditor for MockService {
         async fn edit_message(
             &self,
@@ -181,6 +188,7 @@ mod tests {
                 ChannelConfig {
                     service: "matrix".to_string(),
                     channel: "!room1:matrix.org".to_string(),
+                    room_name: None,
                     display_names: true,
                     enable_media: true,
                     bridge_own_messages: true,
@@ -189,6 +197,7 @@ mod tests {
                 ChannelConfig {
                     service: "discord".to_string(),
                     channel: "123456".to_string(),
+                    room_name: None,
                     display_names: true,
                     enable_media: true,
                     bridge_own_messages: true,

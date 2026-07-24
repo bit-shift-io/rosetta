@@ -45,7 +45,7 @@ pub mod formatter {
 // Re-export fine-grained traits
 pub use crate::services::traits::{
     Connectable, MandatoryService, MemberLister, MessageEditor, MessageSender, OptionalEditor,
-    OptionalMembers, ReactionSender, ServiceInfo,
+    OptionalMembers, OptionalRoomNameFetcher, ReactionSender, RoomNameFetcher, ServiceInfo,
 };
 
 // Re-export ServiceBuilder and ServiceRegistry

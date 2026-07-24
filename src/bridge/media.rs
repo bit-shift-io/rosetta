@@ -55,6 +55,7 @@ mod tests {
         ChannelConfig {
             service: "discord".to_string(),
             channel: "channel1".to_string(),
+            room_name: None,
             display_names,
             enable_media,
             bridge_own_messages: false,

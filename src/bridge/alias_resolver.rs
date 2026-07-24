@@ -27,6 +27,7 @@ fn make_channel_config() -> ChannelConfig {
     ChannelConfig {
         service: "matrix".to_string(),
         channel: "!room1:matrix.org".to_string(),
+        room_name: None,
         display_names: true,
         enable_media: true,
         bridge_own_messages: false,

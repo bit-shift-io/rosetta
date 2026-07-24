@@ -15,9 +15,16 @@
 ---
 
 ### ChannelConfig
-**Definition:** A single entry in a bridge's channel list, specifying `service` name, `channel` identifier, and bridging options (`display_names`, `enable_media`, `bridge_own_messages`, `aliases`).
+**Definition:** A single entry in a bridge's channel list, specifying `service` name, `channel` identifier, `room_name` (human-readable display name populated from service API on connect), and bridging options (`display_names`, `enable_media`, `bridge_own_messages`, `aliases`).
 
 **Boundary:** Protocol-specific identifier format (Matrix room ID, WhatsApp chat JID, Discord channel ID). Not a service instance.
+
+---
+
+### room_name
+**Definition:** The human-readable name of a chat room/channel, fetched from the service API when the bot connects to the room. Stored in `ChannelConfig.room_name` (replaces former `display_name` field). Used in `.status` output and log messages.
+
+**Boundary:** Distinct from `channel` (the protocol-specific ID). May be empty if not yet populated or if API call fails. Updated on connect/reconnect.
 
 ---
 

@@ -41,6 +41,7 @@ mod test_utils {
         ChannelConfig {
             service: service.to_string(),
             channel: channel.to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: false,

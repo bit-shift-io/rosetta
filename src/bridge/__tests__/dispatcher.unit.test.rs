@@ -50,6 +50,20 @@ impl ServiceInfo for MockService {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 }
 
+#[async_trait::async_trait]
+impl MemberLister for MockService {
+    async fn get_room_members(&self, _channel: &str) -> anyhow::Result<Vec<String>> {
+        Ok(vec![])
+    }
+}
+
+#[async_trait::async_trait]
+impl RoomNameFetcher for MockService {
+    async fn get_room_name(&self, _channel: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+}
+
 // Simple formatter for testing
 struct TestFormatter;
 
@@ -68,6 +82,7 @@ fn make_test_config() -> Config {
         ChannelConfig {
             service: "matrix".to_string(),
             channel: "!room1:matrix.org".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: false,
@@ -76,6 +91,7 @@ fn make_test_config() -> Config {
         ChannelConfig {
             service: "discord".to_string(),
             channel: "123456".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: false,

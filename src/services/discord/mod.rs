@@ -6,7 +6,7 @@ use crate::config::DiscordServiceConfig;
 use crate::gif::GifResolver;
 use crate::services::formatter::DiscordFormatter;
 use crate::services::traits::{
-    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, RoomNameFetcher, ServiceInfo,
 };
 use crate::services::{ServiceEvent, ServiceMessage, ServiceUpdate};
 use anyhow::Result;
@@ -571,5 +571,35 @@ impl ServiceInfo for DiscordService {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[async_trait]
+impl RoomNameFetcher for DiscordService {
+    async fn get_room_name(&self, channel: &str) -> Result<Option<String>> {
+        // Try to fetch via HTTP if we have the http client
+        if let Some(http) = self.http.as_ref() {
+            let channel_id: u64 = channel.parse()?;
+            let channel_id = ChannelId::new(channel_id);
+            
+            if let Ok(channel_data) = http.get_channel(channel_id).await {
+                use serenity::all::Channel;
+                let name = match &channel_data {
+                    Channel::Guild(g) => g.name.clone(),
+                    Channel::Private(p) => {
+                        let name = p.name();
+                        if name.is_empty() {
+                            "Direct Message".to_string()
+                        } else {
+                            name
+                        }
+                    },
+                    _ => "Unknown Channel".to_string(),
+                };
+                return Ok(Some(name));
+            }
+        }
+
+        Ok(None)
     }
 }

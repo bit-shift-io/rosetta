@@ -54,6 +54,14 @@ pub trait MemberLister: Send + Sync {
     async fn get_room_members(&self, channel: &str) -> Result<Vec<String>>;
 }
 
+/// Trait for fetching room/channel display names (optional capability)
+#[async_trait]
+pub trait RoomNameFetcher: Send + Sync {
+    /// Get the display name for a room/channel
+    /// Returns None if not supported or failed
+    async fn get_room_name(&self, channel: &str) -> Result<Option<String>>;
+}
+
 /// Trait for service metadata
 pub trait ServiceInfo: Send + Sync + Any {
     /// Get the service name
@@ -66,13 +74,13 @@ pub trait ServiceInfo: Send + Sync + Any {
 
 /// Alias for mandatory traits that all services must implement
 pub trait MandatoryService:
-    Connectable + MessageSender + ReactionSender + ServiceInfo + Send + Sync + Any
+    Connectable + MessageSender + ReactionSender + MemberLister + RoomNameFetcher + ServiceInfo + Send + Sync + Any
 {
 }
 
 // Blanket implementation for types implementing all mandatory traits
 impl<T> MandatoryService for T where
-    T: Connectable + MessageSender + ReactionSender + ServiceInfo + Send + Sync + Any
+    T: Connectable + MessageSender + ReactionSender + MemberLister + RoomNameFetcher + ServiceInfo + Send + Sync + Any
 {
 }
 
@@ -140,6 +148,12 @@ pub trait OptionalMembers: MemberLister + Send + Sync + Any {}
 // Blanket implementation for types implementing members capability
 impl<T> OptionalMembers for T where T: MemberLister + Send + Sync + Any {}
 
+/// Alias for optional room name fetcher capability
+pub trait OptionalRoomNameFetcher: RoomNameFetcher + Send + Sync + Any {}
+
+// Blanket implementation for types implementing room name fetcher capability
+impl<T> OptionalRoomNameFetcher for T where T: RoomNameFetcher + Send + Sync + Any {}
+
 // Implement OptionalEditor for Box<dyn MandatoryService>
 #[async_trait]
 impl MessageEditor for Box<dyn MandatoryService> {
@@ -152,14 +166,21 @@ impl MessageEditor for Box<dyn MandatoryService> {
     }
 }
 
-// Implement OptionalMembers for Box<dyn MandatoryService>
+// Implement OptionalMembers for Box<dyn MandatoryService> - NOT NEEDED since MandatoryService: MemberLister
+// The trait object dyn MandatoryService already implements MemberLister directly
+
+// Implement OptionalRoomNameFetcher for Box<dyn MandatoryService> - NOT NEEDED since MandatoryService: RoomNameFetcher
+
 #[async_trait]
 impl MemberLister for Box<dyn MandatoryService> {
     async fn get_room_members(&self, channel: &str) -> Result<Vec<String>> {
-        if let Some(member_lister) = self.as_any().downcast_ref::<Box<dyn OptionalMembers>>() {
-            member_lister.get_room_members(channel).await
-        } else {
-            Ok(vec![])
-        }
+        (**self).get_room_members(channel).await
+    }
+}
+
+#[async_trait]
+impl RoomNameFetcher for Box<dyn MandatoryService> {
+    async fn get_room_name(&self, channel: &str) -> Result<Option<String>> {
+        (**self).get_room_name(channel).await
     }
 }

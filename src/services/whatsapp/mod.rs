@@ -5,7 +5,7 @@ use crate::bridge::formatter::MessageFormatter;
 use crate::config::WhatsAppServiceConfig;
 use crate::services::formatter::WhatsAppFormatter;
 use crate::services::traits::{
-    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, RoomNameFetcher, ServiceInfo,
 };
 use crate::services::{ServiceEvent, ServiceMessage};
 use anyhow::Result;
@@ -427,5 +427,14 @@ impl ServiceInfo for WhatsAppService {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[async_trait]
+impl RoomNameFetcher for WhatsAppService {
+    async fn get_room_name(&self, _channel: &str) -> Result<Option<String>> {
+        // WhatsApp service doesn't currently expose a way to fetch chat names
+        // The client doesn't provide a get_chat method directly
+        Ok(None)
     }
 }

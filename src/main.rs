@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 use anyhow::Result;
-use log::{error, info};
+use log::{error, info, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     builder.init();
 
     // Load configuration
-    let config = Config::load("data/config.yaml")?;
+    let mut config = Config::load("data/config.yaml")?;
 
     // Create GifResolver
     let gif_resolver = Arc::new(GifResolver::new(
@@ -109,6 +109,31 @@ async fn main() -> Result<()> {
 
     // Wait for all services to be ready
     registry.wait_all_ready().await?;
+
+    // Fetch and store room names for all bridged channels
+    info!("Fetching room names for all bridged channels...");
+    for (bridge_name, channels) in &mut config.bridges {
+        for channel in channels {
+            if let Some(svc_lock) = registry.services().get(&channel.service) {
+                let svc = svc_lock.lock().await;
+                // Box<dyn MandatoryService> implements RoomNameFetcher directly
+                match svc.get_room_name(&channel.channel).await {
+                    Ok(Some(name)) => {
+                        info!("  [{}] {} ({}) -> {}", bridge_name, channel.service, channel.channel, name);
+                        channel.room_name = Some(name);
+                    }
+                    Ok(None) => {
+                        info!("  [{}] {} ({}) -> no name available", bridge_name, channel.service, channel.channel);
+                    }
+                    Err(e) => {
+                        warn!("  [{}] {} ({}) -> error fetching name: {}", bridge_name, channel.service, channel.channel, e);
+                    }
+                }
+            } else {
+                warn!("  [{}] {} ({}) -> service not found in registry", bridge_name, channel.service, channel.channel);
+            }
+        }
+    }
 
     // Create and start bridge coordinator
     let coordinator = bridge::BridgeCoordinator::new(config, registry.services().clone())?;

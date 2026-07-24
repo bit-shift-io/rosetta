@@ -92,6 +92,7 @@ fn make_test_config() -> Config {
         ChannelConfig {
             service: "matrix".to_string(),
             channel: "!room1:matrix.org".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: true,
@@ -100,6 +101,7 @@ fn make_test_config() -> Config {
         ChannelConfig {
             service: "discord".to_string(),
             channel: "123456".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: true,
@@ -247,6 +249,7 @@ async fn edit_handler_handles_multiple_destinations() {
         ChannelConfig {
             service: "matrix".to_string(),
             channel: "!room1:matrix.org".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: true,
@@ -255,6 +258,7 @@ async fn edit_handler_handles_multiple_destinations() {
         ChannelConfig {
             service: "discord".to_string(),
             channel: "123456".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: true,
@@ -263,6 +267,7 @@ async fn edit_handler_handles_multiple_destinations() {
         ChannelConfig {
             service: "whatsapp".to_string(),
             channel: "group1".to_string(),
+            room_name: None,
             display_names: true,
             enable_media: true,
             bridge_own_messages: true,

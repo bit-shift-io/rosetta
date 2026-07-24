@@ -128,9 +128,9 @@ impl Default for ServiceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::traits::{
-        Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
-    };
+use crate::services::traits::{
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, RoomNameFetcher, ServiceInfo,
+};
     use crate::services::{ServiceEvent, ServiceMessage};
     use anyhow::Result;
     use async_trait::async_trait;
@@ -205,6 +205,13 @@ mod tests {
     impl MemberLister for MockService {
         async fn get_room_members(&self, _channel: &str) -> Result<Vec<String>> {
             Ok(vec![])
+        }
+    }
+
+    #[async_trait]
+    impl RoomNameFetcher for MockService {
+        async fn get_room_name(&self, _channel: &str) -> Result<Option<String>> {
+            Ok(None)
         }
     }
 

@@ -93,6 +93,9 @@ pub struct ChannelConfig {
     pub service: String,
     /// Channel/room identifier (protocol-specific format)
     pub channel: String,
+    /// Optional room name for the room/channel (populated from service API on connect, shown in status messages)
+    #[serde(default)]
+    pub room_name: Option<String>,
     /// Whether to bridge display names in forwarded messages
     #[serde(default = "default_true")]
     pub display_names: bool,

@@ -5,7 +5,7 @@ use crate::bridge::formatter::MessageFormatter;
 use crate::config::MatrixServiceConfig;
 use crate::services::formatter::MatrixFormatter;
 use crate::services::traits::{
-    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, ServiceInfo,
+    Connectable, MemberLister, MessageEditor, MessageSender, ReactionSender, RoomNameFetcher, ServiceInfo,
 };
 use crate::services::{ServiceEvent, ServiceMessage};
 use anyhow::Result;
@@ -566,6 +566,26 @@ impl MemberLister for MatrixService {
             Ok(names)
         } else {
             Ok(vec!["Room not found".to_string()])
+        }
+    }
+}
+
+#[async_trait]
+impl RoomNameFetcher for MatrixService {
+    async fn get_room_name(&self, channel: &str) -> Result<Option<String>> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Matrix client not connected"))?;
+
+        let room_id = <&RoomId>::try_from(channel)?;
+
+        if let Some(room) = client.get_room(room_id) {
+            // Get the room name from the m.room.name state event
+            let room_name = room.name();
+            Ok(room_name.map(|s| s.to_string()))
+        } else {
+            Ok(None)
         }
     }
 }

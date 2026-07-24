@@ -5,7 +5,7 @@ use crate::bridge::media::MediaHandler;
 use crate::config::Config;
 use crate::persistence::MessageStore;
 use crate::services::ServiceMessage;
-use crate::services::traits::{MandatoryService, OptionalMembers};
+use crate::services::traits::MandatoryService;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -94,106 +94,6 @@ impl MessageDispatcher {
                 );
                 return Ok(());
             }
-        }
-
-        // Handle .status command
-        if msg.content.trim() == ".status" {
-            let bridge_name = config
-                .bridges
-                .iter()
-                .find(|(_, channels)| {
-                    channels.iter().any(|ch| {
-                        ch.service == msg.source_service && ch.channel == msg.source_channel
-                    })
-                })
-                .map(|(name, _)| name.as_str())
-                .unwrap_or("unknown");
-
-            log::info!("Status command received in bridge '{}'", bridge_name);
-
-            let mut status_lines = Vec::new();
-            status_lines.push(format!("**Bridge Status: {}**", bridge_name));
-
-            // 1. Service Health Section
-            status_lines.push("\n**Services**".to_string());
-            let mut checked_services = Vec::new();
-            for ch in &target_channels {
-                if !checked_services.contains(&ch.service) {
-                    if let Some(svc_lock) = services.get(ch.service.as_str()) {
-                        let svc = svc_lock.lock().await;
-                        let status = if svc.is_connected() {
-                            "✅ Connected"
-                        } else {
-                            "❌ Disconnected"
-                        };
-                        status_lines.push(format!("* **{}**: {}", ch.service, status));
-                    } else {
-                        status_lines.push(format!("* **{}**: ❓ Service Not Found", ch.service));
-                    }
-                    checked_services.push(ch.service.clone());
-                }
-            }
-
-            // 2. Room Members Section
-            status_lines.push("\n**Rooms**".to_string());
-            for ch in &target_channels {
-                if let Some(svc_lock) = services.get(ch.service.as_str()) {
-                    let svc = svc_lock.lock().await;
-                    status_lines.push(format!("\n**{}:{}**", ch.service, ch.channel));
-
-                    // Downcast to MemberLister for get_room_members
-                    if let Some(member_lister) =
-                        svc.as_any().downcast_ref::<Box<dyn OptionalMembers>>()
-                    {
-                        match member_lister.get_room_members(&ch.channel).await {
-                            Ok(members) => {
-                                if members.is_empty() {
-                                    status_lines.push(
-                                        "* *(No members found or not supported)*".to_string(),
-                                    );
-                                } else {
-                                    for member in members {
-                                        status_lines.push(format!("* **{}**", member));
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                status_lines.push(format!("* *Error fetching members: {}*", e));
-                            }
-                        }
-                    } else {
-                        status_lines.push("* *(Member listing not supported)*".to_string());
-                    }
-                }
-            }
-
-            let status_msg_content = status_lines.join("\n");
-            let status_msg = ServiceMessage {
-                sender: "System".to_string(),
-                sender_id: "system".to_string(),
-                content: status_msg_content,
-                attachments: vec![],
-                source_service: "bridge".to_string(),
-                source_channel: "system".to_string(),
-                source_id: "system".to_string(),
-                is_own: true,
-            };
-
-            // Send status response only to the channel that requested it
-            if let Some(svc_lock) = services.get(msg.source_service.as_str()) {
-                let svc = svc_lock.lock().await;
-                if let Err(e) = svc.send_message(&msg.source_channel, &status_msg).await {
-                    log::error!(
-                        "Failed to send status to {}:{}: {}",
-                        msg.source_service,
-                        msg.source_channel,
-                        e
-                    );
-                }
-            }
-
-            // Skip further processing
-            return Ok(());
         }
 
         // Resolve sender name (applying aliases if configured) using AliasResolver

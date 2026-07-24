@@ -38,6 +38,7 @@ bridges:
   family_bridge:
     - service: matrix_bot
       channel: "!room:matrix.org"
+      room_name: "Family Matrix Room"  # Optional: human-readable name (auto-populated on connect)
       display_names: true
       # Whether to bridge messages sent by this account in this room (default: false)
       # Usually false for bots, but may be true if using a personal account
@@ -47,6 +48,7 @@ bridges:
         "@user:matrix.org": "Bob"
     - service: whatsapp
       channel: "00000@lid"
+      room_name: "Family WhatsApp Group"  # Optional: human-readable name (auto-populated on connect)
       display_names: true
       enable_media: true
       # Example: bridge your own messages sent from your phone
@@ -58,11 +60,13 @@ bridges:
   rpg_bridge:
     - service: matrix_bot
       channel: "!room:matrix.org"
+      room_name: "RPG Matrix Room"  # Optional: human-readable name (auto-populated on connect)
       display_names: true
       enable_media: true
       bridge_own_messages: false
     - service: discord_direct
       channel: "1234567890" # Discord channel ID (right-click channel -> Copy ID)
+      room_name: "RPG Discord Channel"  # Optional: human-readable name (auto-populated on connect)
       display_names: true
       bridge_own_messages: false
       enable_media: false # Example: Disable media sending to Discord (text only)
